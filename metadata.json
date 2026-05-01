@@ -1,0 +1,10 @@
+{
+  "name": "CrewOS - Digital Crew Orchestrator",
+  "description": "A sophisticated local-first AI agent management dashboard with glassmorphism design and multi-agent coordination views.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "AI Orchestration",
+    "Resource Monitoring",
+    "Local-first Deployment"
+  ]
+}
