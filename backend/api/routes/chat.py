@@ -3,6 +3,12 @@ Chat API Routes - SSE streaming support
 """
 import asyncio
 import json
+from datetime import datetime
+
+
+def json_dumps_safe(obj):
+    """JSON serialize with datetime support."""
+    return json.dumps(obj, default=lambda x: x.isoformat() if isinstance(x, datetime) else str(x))
 import re
 import uuid
 from typing import Optional, AsyncIterator
@@ -32,9 +38,34 @@ class InterveneRequest(BaseModel):
     message: str
 
 
+def match_mentioned_agents(mentioned_names: list[str], all_agents: list) -> list:
+    """
+    Match mentioned agent names to actual agents with priority:
+    1. Exact id match
+    2. Exact name match (case-insensitive)
+    3. Substring match only if unique (last fallback)
+    """
+    matched = []
+    for name in mentioned_names:
+        # 1. Exact id match
+        agent = next((a for a in all_agents if a.id == name), None)
+        if agent:
+            matched.append(agent)
+            continue
+        # 2. Exact name match (case-insensitive)
+        agent = next((a for a in all_agents if a.name.lower() == name.lower()), None)
+        if agent:
+            matched.append(agent)
+            continue
+        # 3. Substring match (last fallback, only if unique)
+        candidates = [a for a in all_agents if name.lower() in a.name.lower()]
+        if len(candidates) == 1:
+            matched.append(candidates[0])
+    return matched
+
+
 def parse_mentions(message: str) -> list[str]:
     """Parse @ mentions from message and return agent IDs."""
-    # Match @name patterns
     mention_pattern = r'@(\w+)'
     mentions = re.findall(mention_pattern, message)
     return mentions
@@ -110,8 +141,7 @@ async def chat_team(request: ChatRequest):
 
     # Filter agents based on @ mentions if specified
     if mentioned_names and request.mentioned_agents is None:
-        # Match by name
-        mentioned_agents = [a for a in all_agents if any(name.lower() in a.name.lower() for name in mentioned_names)]
+        mentioned_agents = match_mentioned_agents(mentioned_names, all_agents)
     else:
         mentioned_agents = [a for a in all_agents if a.id in (request.mentioned_agents or [])]
 
@@ -178,7 +208,7 @@ async def chat_team_stream(request: ChatRequest):
         user_msg = ChatMessage(role="user", content=request.message)
         session.messages.append(user_msg)
         session_store.update(session)
-        yield f"data: {json.dumps({'type': 'message', 'content': request.message, 'role': 'user'})}\n\n"
+        yield f"data: {json_dumps_safe({'type': 'message', 'content': request.message, 'role': 'user'})}\n\n"
 
         # Get mentioned agents from @ mentions
         mentioned_names = parse_mentions(request.message)
@@ -195,7 +225,7 @@ async def chat_team_stream(request: ChatRequest):
         target_agents = mentioned_agents if mentioned_agents else all_agents
 
         if not target_agents:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'No agents available'})}\n\n"
+            yield f"data: {json_dumps_safe({'type': 'error', 'content': 'No agents available'})}\n\n"
             return
 
         # Create task
@@ -204,25 +234,25 @@ async def chat_team_stream(request: ChatRequest):
             priority=0,
         )
         await task_scheduler.assign_task(task.id, [a.id for a in target_agents])
-        yield f"data: {json.dumps({'type': 'task_created', 'task_id': task.id})}\n\n"
+        yield f"data: {json_dumps_safe({'type': 'task_created', 'task_id': task.id})}\n\n"
 
         # Send agent list being used
         agent_list = [{'id': a.id, 'name': a.name, 'role': a.role.value} for a in target_agents]
-        yield f"data: {json.dumps({'type': 'agents_assigned', 'agents': agent_list})}\n\n"
+        yield f"data: {json_dumps_safe({'type': 'agents_assigned', 'agents': agent_list})}\n\n"
 
         # Send initial status
-        yield f"data: {json.dumps({'type': 'status', 'content': f'已分配 {len(target_agents)} 个代理，开始执行任务...'})}\n\n"
+        yield f"data: {json_dumps_safe({'type': 'status', 'content': f'已分配 {len(target_agents)} 个代理，开始执行任务...'})}\n\n"
 
         # Send subtask_start for each agent
         for i, agent in enumerate(target_agents):
-            yield f"data: {json.dumps({'type': 'subtask_start', 'agent_id': agent.id, 'agent_name': agent.name})}\n\n"
+            yield f"data: {json_dumps_safe({'type': 'subtask_start', 'agent_id': agent.id, 'agent_name': agent.name})}\n\n"
 
         # Stream response using supervisor with real-time progress
         final_output = ""
         results = {}
         try:
             # First send thinking status
-            yield f"data: {json.dumps({'type': 'status', 'content': '主管代理正在分析并分解任务...'})}\n\n"
+            yield f"data: {json_dumps_safe({'type': 'status', 'content': '主管代理正在分析并分解任务...'})}\n\n"
 
             async for event in supervisor_runtime.execute(
                 goal=request.message,
@@ -230,7 +260,7 @@ async def chat_team_stream(request: ChatRequest):
                 task_id=task.id,
             ):
                 # Forward supervisor events as SSE
-                yield f"data: {json.dumps(event)}\n\n"
+                yield f"data: {json_dumps_safe(event)}\n\n"
                 # Collect final output and results
                 if event.get("type") == "done":
                     final_output = event.get("output", "")
@@ -240,10 +270,10 @@ async def chat_team_stream(request: ChatRequest):
             await task_scheduler.complete_task(task.id, {"output": final_output})
 
             # Send final result
-            yield f"data: {json.dumps({'type': 'result', 'content': final_output})}\n\n"
+            yield f"data: {json_dumps_safe({'type': 'result', 'content': final_output})}\n\n"
 
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            yield f"data: {json_dumps_safe({'type': 'error', 'content': str(e)})}\n\n"
 
         # Save assistant response to session (even on error/timeout with partial results)
         if final_output:
@@ -251,7 +281,7 @@ async def chat_team_stream(request: ChatRequest):
             session.messages.append(assistant_msg)
             session_store.update(session)
 
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        yield f"data: {json_dumps_safe({'type': 'done'})}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -265,7 +295,12 @@ async def chat_team_stream(request: ChatRequest):
 
 @router.post("/{session_id}/intervene")
 async def intervene_chat(session_id: str, request: InterveneRequest):
-    """User intervention during team chat"""
+    """
+    User intervention during team chat.
+
+    Submits user input to the supervisor for processing during execution.
+    The supervisor will process this input when it polls for intervention.
+    """
     session = session_store.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -275,7 +310,13 @@ async def intervene_chat(session_id: str, request: InterveneRequest):
     session.messages.append(user_msg)
     session_store.update(session)
 
-    return {"message": "Intervention recorded", "session_id": session_id}
+    # Submit intervention to supervisor runtime
+    supervisor_runtime.submit_intervention(session_id, {
+        "message": request.message,
+        "session_id": session_id,
+    })
+
+    return {"message": "Intervention submitted", "session_id": session_id}
 
 
 @router.get("/sessions")

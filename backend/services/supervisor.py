@@ -10,6 +10,10 @@ from backend.models.schemas import AgentConfig, AgentStatus, AgentRole, ReActSte
 from backend.services.agent_manager import agent_manager
 from backend.services.task_scheduler import task_scheduler
 from backend.services.llm_router import llm_router, RateLimitError
+from backend.services.graph.state import GraphState, SubAgentContext
+from backend.services.graph.engine import create_default_engine
+from backend.services.graph.nodes import plan_node, execute_node, integrate_node, route_after_plan, route_after_execute
+from backend.services.graph.events import GraphEvent
 
 logger = structlog.get_logger()
 
@@ -28,6 +32,7 @@ class SupervisorRuntime:
             "backoff_max": 30.0,
         }
         self._cancellation_requests: dict[str, asyncio.Event] = {}
+        self._intervention_requests: dict[str, dict] = {}
 
     def request_cancellation(self, task_id: str) -> bool:
         """Request cancellation for a running task."""
@@ -35,6 +40,14 @@ class SupervisorRuntime:
             self._cancellation_requests[task_id].set()
             return True
         return False
+
+    def submit_intervention(self, thread_id: str, input_data: dict) -> None:
+        """Submit user intervention for a running thread."""
+        self._intervention_requests[thread_id] = input_data
+
+    def get_intervention(self, thread_id: str) -> Optional[dict]:
+        """Get and clear pending intervention for a thread."""
+        return self._intervention_requests.pop(thread_id, None)
 
     def _is_cancelled(self, task_id: str) -> bool:
         """Check if cancellation was requested for this task."""
@@ -49,70 +62,82 @@ class SupervisorRuntime:
         task_id: str,
     ) -> AsyncIterator[dict]:
         """
-        Main supervisor execution flow.
+        Main supervisor execution flow via GraphEngine.
         Yields progress events as the execution proceeds.
 
-        1. Analyze goal and available agents
-        2. Decompose into subtasks with dependencies
-        3. Execute subtasks (parallel when possible)
-        4. Monitor for failures and retry as needed
-        5. Integrate results and return final output
+        1. Build initial GraphState
+        2. Execute via GraphEngine (plan → execute → integrate)
+        3. Yield events adapted from GraphEvent to legacy dict format
         """
+        import uuid
+        from backend.services.graph.state import SubAgentContext
+        from backend.services.graph.engine import create_default_engine
+
         logger.info("supervisor_execution_started", goal=goal[:100], task_id=task_id)
 
-        # Set up cancellation event for this task
+        # Set up cancellation
         cancel_event = asyncio.Event()
         self._cancellation_requests[task_id] = cancel_event
 
+        thread_id = str(uuid.uuid4())
+
         try:
-            # Build execution plan
-            plan = await self._decompose_task(goal, available_agents)
-            yield {"type": "status", "content": f"已分解为 {len(plan.get('subtasks', []))} 个子任务"}
+            # Build initial state
+            initial_state: GraphState = {
+                "thread_id": thread_id,
+                "goal": goal,
+                "plan": [],
+                "current_step": 0,
+                "results": {},
+                "raw_outputs": {},
+                "status": "planning",
+                "error": None,
+                "context": SubAgentContext(goal=goal),
+                "available_agents": available_agents,
+            }
 
-            # Emit react_step for plan decomposition
-            subtasks_count = len(plan.get("subtasks", []))
-            step = await task_scheduler.add_react_step(
-                task_id=task_id,
-                agent_id="supervisor",
-                thought=f"Analyzed goal and decomposed into {subtasks_count} subtasks",
-                action="decompose_task",
-            )
-            yield {"type": "react_step", "step": {
-                "step_id": step.step_id,
-                "agent_id": "supervisor",
-                "thought": step.thought,
-                "action": step.action,
-                "observation": step.observation,
-            }}
+            # Convert GraphEvent to legacy dict format
+            async def emit(event: GraphEvent):
+                event_dict = event.model_dump(exclude_none=True)
+                # Remove original type from event_dict since we're replacing it
+                event_dict.pop("type", None)
+                # Map GraphEvent types to legacy types
+                type_map = {
+                    "state_update": "status",
+                    "node_start": "status",
+                    "node_end": "status",
+                    "stream_token": "subtask_token",
+                    "subtask_start": "subtask_start",
+                    "subtask_complete": "subtask_complete",
+                    "subtask_error": "subtask_error",
+                    "subtask_progress": "status",
+                    "status": "status",
+                    "react_step": "react_step",
+                    "interrupt": "status",
+                    "done": "done",
+                    "error": "error",
+                }
+                legacy_type = type_map.get(event.type, event.type)
+                out = {"type": legacy_type, **event_dict}
+                logger.info("supervisor_emit", event_type=event.type, legacy_type=legacy_type, out_type=out.get("type"))
+                # Yield the dict so engine can iterate and yield all events
+                yield out
 
-            # Execute plan
-            collected_results = {}
-            async for event in self._execute_plan_gen(plan, task_id, available_agents):
-                if event is None:
-                    continue
-                # Forward react_step events to the frontend
-                if event.get("type") == "react_step":
-                    yield event
-                elif self._is_cancelled(task_id):
+            # Create engine and execute
+            engine = create_default_engine()
+            engine.add_node("plan", plan_node)
+            engine.add_node("execute", execute_node)
+            engine.add_node("integrate", integrate_node)
+            engine.add_edge("plan", route_after_plan)
+            engine.add_edge("execute", route_after_execute)
+
+            async for event in engine.execute(initial_state, emit):
+                if self._is_cancelled(task_id):
                     yield {"type": "cancelled", "content": "任务已被用户取消"}
-                    final_output = await self._integrate_results(collected_results)
-                    yield {"type": "done", "output": f"[已取消] {final_output}", "results": collected_results}
                     break
-                elif event.get("type") == "results_ready":
-                    collected_results = event.get("results", {})
-                    # Integrate results and yield final done event
-                    final_output = await self._integrate_results(collected_results)
-                    logger.info("supervisor_execution_completed", task_id=task_id)
-                    yield {"type": "done", "output": final_output, "results": collected_results}
-                    break  # Exit loop after done
-                else:
-                    yield event
-            # Fallback: if we exit the loop without results_ready, yield done with what we have
-            if not collected_results:
-                final_output = await self._integrate_results(collected_results)
-                yield {"type": "done", "output": final_output, "results": collected_results}
+                yield event
+
         finally:
-            # Clean up cancellation event
             self._cancellation_requests.pop(task_id, None)
 
     async def _execute_plan_gen(
