@@ -113,7 +113,7 @@ class SupervisorRuntime:
                     "subtask_progress": "status",
                     "status": "status",
                     "react_step": "react_step",
-                    "interrupt": "status",
+                    "interrupt": "interrupt",
                     "done": "done",
                     "error": "error",
                 }

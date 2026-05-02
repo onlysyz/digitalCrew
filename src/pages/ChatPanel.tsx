@@ -97,6 +97,8 @@ export default function ChatPanel() {
     interruptMessage,
     clearInterrupt,
     setInterruptMessage,
+    doneOutput,
+    accumulatedContent,
   } = useThreadStore();
 
   // Get missing functions from chatStore
@@ -231,119 +233,48 @@ export default function ChatPanel() {
   };
 
   const handleStreamEvent = async (event: StreamEvent, responseText: { current: string }) => {
+    applyEvent(event);
+
     switch (event.type) {
-      case 'status':
-        setStatusMessage(event.content || '处理中...');
-        break;
-      case 'message':
-        // User message echoed back - already added
-        break;
-      case 'agents_assigned':
-        if (event.agents) {
-          setAssignedAgents(event.agents.map(a => ({
-            ...a,
-            status: 'pending' as const
-          })));
-        }
-        break;
-      case 'task_created':
-        if (event.task_id) {
-          setTaskId(event.task_id);
-        }
-        setExecutionPlan({
-          steps: [{ agent: '初始化', task: '任务已创建', status: 'pending' }],
-        });
-        break;
-      case 'subtask_start':
-        console.log('[ChatPanel] subtask_start:', event.agent_id, event.agent_name);
-        if (event.agent_id && event.agent_name) {
-          updateAgent(event.agent_id, { status: 'working' });
-          setStatusMessage(`${event.agent_name} 正在工作...`);
-        }
-        break;
-      case 'subtask_complete':
-        console.log('[ChatPanel] subtask_complete:', event.agent_id, event.subtask_id);
-        if (event.agent_id) {
-          updateAgent(event.agent_id, { status: 'completed' });
-        }
-        if (event.subtask_id && event.output) {
-          setExecutionPlan((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              steps: [
-                ...(prev as any).steps,
-                { agent: event.subtask_id!, task: event.output!, status: 'completed' as const },
-              ],
-            };
-          });
-        }
-        break;
-      case 'subtask_error':
-        if (event.agent_id) {
-          updateAgent(event.agent_id, { status: 'error' });
-        }
-        break;
       case 'subtask_token':
-        console.log('[ChatPanel] subtask_token event:', event.agent_id, event.token);
-        if (event.token && event.agent_id) {
-          const agent = assignedAgents.find(a => a.id === event.agent_id);
-          if (agent) {
-            updateAgent(event.agent_id, { streamingContent: (agent.streamingContent || '') + event.token });
-          }
-          responseText.current += event.token;
-        }
+        responseText.current += event.token || '';
+        // Also accumulated in store for fallback when doneOutput not set
         break;
       case 'result':
-        responseText.current = event.content || '';
+        responseText.current = doneOutput || event.content || '';
         break;
       case 'error':
-        responseText.current = event.content || 'An error occurred';
+        responseText.current = doneOutput || event.content || 'An error occurred';
         break;
-      case 'done':
-        // Update the placeholder message with final content
-        if (responseText.current || streamingMessageId) {
+      case 'done': {
+        // Use doneOutput from applyEvent if available (from event.output), else accumulated responseText
+        const finalContent = doneOutput || accumulatedContent || responseText.current;
+        if (finalContent || streamingMessageId) {
           useChatStore.setState((state) => ({
             messages: state.messages.map(msg =>
               msg.id === streamingMessageId
-                ? { ...msg, content: responseText.current, metadata: { is_streaming: false } }
+                ? { ...msg, content: finalContent, metadata: { is_streaming: false } }
                 : msg
             ),
           }));
         }
         setStreamingMessageId(null);
-        setStatusMessage('');
-        setTaskId(null);
         setIsCancelling(false);
         break;
+      }
       case 'cancelled':
         toast.warning('任务已被取消');
-        setStatusMessage('任务已被取消');
-        setTaskId(null);
         setIsCancelling(false);
         break;
-      case 'interrupt':
-        console.log('[ChatPanel] interrupt event received, thread_id:', event.thread_id);
-        if (event.thread_id) {
-          setStatusMessage('任务已暂停，等待您的指令...');
-          setIsCancelling(false);
-        }
-        break;
+      case 'message':
+      case 'status':
+      case 'agents_assigned':
+      case 'task_created':
+      case 'subtask_start':
+      case 'subtask_complete':
+      case 'subtask_error':
       case 'react_step':
-        if (event.step) {
-          addReactStep({
-            step_id: event.step!.step_id,
-            agent_id: event.step!.agent_id,
-            thought: event.step!.thought,
-            action: event.step!.action,
-            action_input: {},
-            observation: event.step!.observation || '',
-            timestamp: new Date().toISOString(),
-            token_input: 0,
-            token_output: 0,
-            duration_ms: 0,
-          });
-        }
+      case 'interrupt':
         break;
     }
   };

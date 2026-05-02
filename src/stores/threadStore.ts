@@ -52,6 +52,13 @@ interface ThreadState {
   interruptThreadId: string | null;
   interruptMessage: string;
 
+  // Final output from streaming (read by ChatPanel after 'done')
+  doneOutput: string | null;
+  accumulatedContent: string;
+
+  // Accumulate streaming tokens (for responseText fallback when no doneOutput)
+  appendToken: (token: string) => void;
+
   // Actions
   startThread: (threadId: string) => void;
   endThread: () => void;
@@ -80,6 +87,9 @@ interface ThreadState {
   setInterruptMessage: (message: string) => void;
   clearInterrupt: () => void;
 
+  // Final output tracking (for 'done' event to consume)
+  setDoneOutput: (output: string | null) => void;
+
   // Reset all state
   reset: () => void;
 }
@@ -96,6 +106,8 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
   isInterrupted: false,
   interruptThreadId: null,
   interruptMessage: '',
+  doneOutput: null,
+  accumulatedContent: '',
 
   startThread: (threadId: string) => {
     set({
@@ -174,6 +186,14 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
     set({ isInterrupted: false, interruptThreadId: null, interruptMessage: '' });
   },
 
+  setDoneOutput: (output: string | null) => {
+    set({ doneOutput: output });
+  },
+
+  appendToken: (token: string) => {
+    set((prev) => ({ accumulatedContent: prev.accumulatedContent + token }));
+  },
+
   applyEvent: (event: GraphEvent) => {
     const state = get();
 
@@ -191,9 +211,19 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
         }
         break;
 
+      case 'task_created':
+        if (event.task_id) {
+          set({ currentTaskId: event.task_id });
+        }
+        set({ executionPlan: { steps: [] } });
+        break;
+
       case 'subtask_start':
         if (event.agent_id) {
           get().updateAgent(event.agent_id, { status: 'working' });
+        }
+        if (event.agent_name) {
+          set({ statusMessage: `${event.agent_name} 正在工作...` });
         }
         break;
 
@@ -202,12 +232,29 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
           get().updateAgent(event.agent_id, {
             streamingContent: (state.assignedAgents.find(a => a.id === event.agent_id)?.streamingContent || '') + event.token,
           });
+          get().appendToken(event.token);
         }
         break;
 
       case 'subtask_complete':
         if (event.agent_id) {
           get().updateAgent(event.agent_id, { status: 'completed' });
+        }
+        if (event.subtask_id && event.output) {
+          set((prev) => {
+            const plan = prev.executionPlan as { steps: unknown[] } | null;
+            if (!plan) return prev;
+            return {
+              ...prev,
+              executionPlan: {
+                ...plan,
+                steps: [
+                  ...plan.steps,
+                  { agent: event.subtask_id, task: event.output, status: 'completed' },
+                ],
+              },
+            };
+          });
         }
         break;
 
@@ -229,20 +276,44 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
 
       case 'react_step':
         if (event.step) {
-          get().addReactStep(event.step);
+          get().addReactStep({
+            step_id: (event.step as { step_id: number }).step_id,
+            agent_id: (event.step as { agent_id: string }).agent_id,
+            thought: (event.step as { thought: string }).thought,
+            action: (event.step as { action: string }).action,
+            action_input: {},
+            observation: (event.step as { observation?: string }).observation || '',
+            timestamp: new Date().toISOString(),
+            token_input: 0,
+            token_output: 0,
+            duration_ms: 0,
+          });
         }
         break;
 
       case 'interrupt':
         if (event.thread_id) {
           get().setInterrupted(event.thread_id, event.content || '');
+          set({ statusMessage: '任务已暂停，等待您的指令...' });
         }
         break;
 
-      case 'done':
-      case 'error':
       case 'cancelled':
-        set({ isStreaming: false });
+        set({ isStreaming: false, statusMessage: '任务已被取消', currentTaskId: null });
+        break;
+
+      case 'done':
+        get().setDoneOutput(event.output || null);
+        set({ isStreaming: false, statusMessage: '', currentTaskId: null });
+        break;
+
+      case 'result':
+        get().setDoneOutput(event.content || null);
+        break;
+
+      case 'error':
+        get().setDoneOutput(event.content || 'An error occurred');
+        set({ isStreaming: false, statusMessage: '', currentTaskId: null });
         break;
 
       default:
@@ -263,6 +334,8 @@ export const useThreadStore = create<ThreadState>((set, get) => ({
       isInterrupted: false,
       interruptThreadId: null,
       interruptMessage: '',
+      doneOutput: null,
+  accumulatedContent: '',
     });
   },
 }));
