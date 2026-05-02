@@ -46,6 +46,91 @@
   }
 }
 
+@keyframes shrink-width {
+  0%, 100% { transform: scaleX(0.3); opacity: 0.3; }
+  50% { transform: scaleX(1); opacity: 1; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.streaming-cursor::after {
+  content: '▊';
+  animation: blink 0.8s step-end infinite;
+  color: theme('colors.primary');
+}
+
+.streaming-fade-in {
+  animation: fade-in-up 0.3s ease-out forwards;
+}
+
+.token-appear {
+  animation: fade-in 0.15s ease-out forwards;
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.step-content-enter {
+  animation: slide-in-right 0.3s ease-out forwards;
+}
+
+.step-content-back {
+  animation: slide-in-left 0.3s ease-out forwards;
+}
+
+.step-container {
+  animation: scale-in 0.3s ease-out forwards;
+}
+
 .glass-panel {
   background: linear-gradient(180deg, rgba(23, 31, 51, 0.7) 0%, rgba(19, 27, 46, 0.4) 100%);
   backdrop-filter: blur(24px);
