@@ -41,6 +41,7 @@ class ReactRecorder:
         token_input: int = 0,
         token_output: int = 0,
         duration_ms: int = 0,
+        task_id: Optional[str] = None,
     ) -> ReActStep:
         """
         Add a ReAct step to the current task's trace.
@@ -71,6 +72,8 @@ class ReactRecorder:
             duration_ms=duration_ms,
         )
         self._steps.append(step)
+        if task_id:
+            logger.debug("react_step_recorded", task_id=task_id, agent_id=agent_id, action=action)
         return step
 
     def get_steps(self) -> list[ReActStep]:
@@ -123,7 +126,6 @@ class ReactRecorder:
             token_output=token_output,
             duration_ms=duration_ms,
         )
-        logger.debug("react_step_recorded", task_id=task_id, agent_id=agent_id, action=action)
         return step
 
 

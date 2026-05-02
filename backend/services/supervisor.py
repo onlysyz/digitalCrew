@@ -8,6 +8,7 @@ import structlog
 
 from backend.models.schemas import AgentConfig, AgentStatus, AgentRole, ReActStep, Task, ModelConfig
 from backend.services.agent_manager import agent_manager
+from backend.services.react_recorder import react_recorder
 from backend.services.llm_router import llm_router, RateLimitError
 from backend.services.graph.state import GraphState, SubAgentContext
 from backend.services.graph.engine import create_default_engine
@@ -169,7 +170,7 @@ class SupervisorRuntime:
             logger.info("executing_task_group", group=group_num, task_count=len(group_tasks))
             yield {"type": "status", "content": f"执行第 {group_num} 组任务，共 {len(group_tasks)} 个"}
 
-            step = await task_scheduler.add_react_step(
+            step = await react_recorder.add_step(
                 task_id=task_id,
                 agent_id="supervisor",
                 thought=f"Starting group {group_num} with {len(group_tasks)} parallel tasks",
@@ -286,7 +287,7 @@ class SupervisorRuntime:
 
         logger.info("executing_subtask", subtask_id=subtask_id, target=target_agent_name)
 
-        await task_scheduler.add_react_step(
+        await react_recorder.add_step(
             task_id=parent_task_id,
             agent_id=f"supervisor:{subtask_id}",
             thought=f"Executing subtask: {description}",
@@ -324,7 +325,7 @@ class SupervisorRuntime:
 
         yield {"type": "subtask_complete", "subtask_id": subtask_id, "agent_id": target_agent.id, "output": output[:200]}
 
-        await task_scheduler.add_react_step(
+        await react_recorder.add_step(
             task_id=parent_task_id,
             agent_id=target_agent.id,
             thought=f"Subtask completed: {subtask_id}",
@@ -448,7 +449,7 @@ Rules:
 
         logger.info("executing_subtask", subtask_id=subtask_id, target=target_agent_name)
 
-        await task_scheduler.add_react_step(
+        await react_recorder.add_step(
             task_id=parent_task_id,
             agent_id=f"supervisor:{subtask_id}",
             thought=f"Executing subtask: {description}",
@@ -477,7 +478,7 @@ Rules:
         # In a full implementation, would call the agent's runtime
         output = await self._execute_agent_task(target_agent, description, parent_task_id)
 
-        await task_scheduler.add_react_step(
+        await react_recorder.add_step(
             task_id=parent_task_id,
             agent_id=target_agent.id,
             thought=f"Subtask completed: {subtask_id}",
