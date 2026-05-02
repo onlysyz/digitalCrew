@@ -1,43 +1,209 @@
-import React, { useState } from 'react';
-import { 
-  Key, 
-  Settings as SettingsIcon, 
-  SlidersHorizontal, 
-  Cpu, 
-  FolderOpen, 
-  Languages, 
+import React, { useState, useEffect } from 'react';
+import {
+  Key,
+  Settings as SettingsIcon,
+  SlidersHorizontal,
+  Cpu,
+  FolderOpen,
+  Languages,
   RefreshCw,
-  MoreVertical,
   Plus,
   Eye,
   EyeOff,
   Terminal,
   Zap,
   Activity,
-  ChevronDown
+  ChevronDown,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Save,
+  AlertCircle
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useSystemStore } from '../stores/systemStore';
+
+type ConnectionStatus = 'idle' | 'testing' | 'connected' | 'failed';
 
 export default function Settings() {
+  const { settings, resources, isLoading, error, fetchSettings, updateSettings, fetchResources } = useSystemStore();
+
   const [showKey, setShowKey] = useState(false);
+  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [temp, setTemp] = useState(0.7);
   const [topP, setTopP] = useState(0.9);
+  const [contextWindow, setContextWindow] = useState(8192);
+  const [language, setLanguage] = useState('zh');
+  const [workspaceDir, setWorkspaceDir] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
+  const [ollamaUrlError, setOllamaUrlError] = useState<string | null>(null);
+  const [sandboxTimeout, setSandboxTimeout] = useState(60);
+  const [maxConcurrentAgents, setMaxConcurrentAgents] = useState(5);
+  const [errorReporting, setErrorReporting] = useState(false);
+  const [anonymousStats, setAnonymousStats] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [restartRequired, setRestartRequired] = useState<string[]>([]);
+  const [showRestartBanner, setShowRestartBanner] = useState(false);
+
+  useEffect(() => {
+    fetchSettings();
+    fetchResources();
+  }, []);
+
+  useEffect(() => {
+    if (settings) {
+      setOllamaUrl(settings.ollama_base_url || 'http://localhost:11434');
+      setTemp(settings.temperature ?? 0.7);
+      setTopP(settings.top_p ?? 0.9);
+      setContextWindow(settings.context_window ?? 8192);
+      setLanguage(settings.language || 'zh');
+      setWorkspaceDir(settings.workspace_dir || '');
+      setSandboxTimeout(settings.sandbox_timeout ?? 60);
+      setMaxConcurrentAgents(settings.max_concurrent_agents ?? 5);
+      setErrorReporting(settings.enable_error_reporting ?? false);
+      setAnonymousStats(settings.enable_anonymous_stats ?? false);
+    }
+  }, [settings]);
+
+  const testOllamaConnection = async () => {
+    setConnectionStatus('testing');
+    try {
+      const response = await fetch(`${ollamaUrl}/api/tags`);
+      if (response.ok) {
+        setConnectionStatus('connected');
+        fetchResources();
+      } else {
+        setConnectionStatus('failed');
+      }
+    } catch {
+      setConnectionStatus('failed');
+    }
+  };
+
+  const validateSettings = (): string | null => {
+    // Validate Ollama URL format
+    if (!ollamaUrl.startsWith('http://') && !ollamaUrl.startsWith('https://')) {
+      setOllamaUrlError('必须以 http:// 或 https:// 开头');
+      return 'Ollama URL 格式无效';
+    }
+    try {
+      new URL(ollamaUrl);
+    } catch {
+      setOllamaUrlError('URL 格式无效');
+      return 'Ollama URL 格式无效';
+    }
+    // Validate sandbox timeout range
+    if (sandboxTimeout < 10 || sandboxTimeout > 300) {
+      return '沙箱超时时间必须在 10-300 秒之间';
+    }
+    // Validate workspace directory is not empty
+    if (workspaceDir.trim().length === 0) {
+      return '工作目录不能为空';
+    }
+    return null;
+  };
+
+  const handleSaveSettings = async () => {
+    const validationError = validateSettings();
+    if (validationError) {
+      setSaveError(validationError);
+      return;
+    }
+    setSaveStatus('saving');
+    setSaveError(null);
+    try {
+      await updateSettings({
+        ollama_base_url: ollamaUrl,
+        temperature: temp,
+        top_p: topP,
+        context_window: contextWindow,
+        language,
+        workspace_dir: workspaceDir,
+        sandbox_timeout: sandboxTimeout,
+        max_concurrent_agents: maxConcurrentAgents,
+        enable_error_reporting: errorReporting,
+        enable_anonymous_stats: anonymousStats,
+      } as any).then((response: any) => {
+        if (response?.restart_required?.length > 0) {
+          setRestartRequired(response.restart_required);
+          setShowRestartBanner(true);
+        }
+      });
+      // Persist LLM defaults to localStorage for agent creation
+      localStorage.setItem('agent_defaults', JSON.stringify({ temperature: temp, top_p: topP, context_window: contextWindow }));
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (err) {
+      setSaveError((err as Error).message || '保存失败，请重试');
+      setSaveStatus('idle');
+    }
+  };
+
+  const formatMemory = (gb: number) => {
+    return gb.toFixed(1);
+  };
 
   return (
     <div className="max-w-[1240px] mx-auto p-8 flex flex-col xl:flex-row gap-8 items-start animate-in fade-in duration-500 pb-24">
       {/* Left Column: Settings Content Panels */}
       <div className="flex-1 flex flex-col gap-8 w-full order-2 xl:order-1">
-        
-        {/* Page Header (Internal to content for bento feel) */}
+
+        {/* Page Header */}
         <div className="mb-2">
-            <h1 className="font-display text-[32px] font-bold text-on-surface mb-2">配置与监控</h1>
-            <p className="font-sans text-[15px] text-on-surface-variant/80">管理数字员工的全局参数、模型密钥，并实时监控本地资源分配。</p>
+          <h1 className="font-display text-[32px] font-bold text-on-surface mb-2">配置与监控</h1>
+          <p className="font-sans text-[15px] text-on-surface-variant/80">管理数字员工的全局参数、模型密钥，并实时监控本地资源分配。</p>
         </div>
+
+        {/* Save Status Banner */}
+        {saveStatus === 'saved' && (
+          <div className="flex items-center gap-2 px-4 py-3 bg-secondary/10 border border-secondary/20 rounded-lg text-secondary">
+            <CheckCircle2 size={18} />
+            <span className="text-sm font-medium">设置已保存</span>
+          </div>
+        )}
+        {saveError && (
+          <div className="flex items-center gap-2 px-4 py-3 bg-error/10 border border-error/20 rounded-lg text-error">
+            <AlertCircle size={18} />
+            <span className="text-sm font-medium">{saveError}</span>
+          </div>
+        )}
+
+        {/* Restart Required Banner */}
+        {showRestartBanner && (
+          <div className="flex items-center justify-between gap-4 px-4 py-3 bg-tertiary/10 border border-tertiary/20 rounded-lg text-tertiary">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={18} />
+              <span className="text-sm font-medium">
+                部分设置 ({restartRequired.join(', ')}) 需要重启服务才能生效
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    await fetch('/api/v1/system/settings/apply', { method: 'POST' });
+                    setShowRestartBanner(false);
+                  } catch { /* ignore */ }
+                }}
+                className="px-3 py-1.5 text-xs font-medium bg-tertiary/20 hover:bg-tertiary/30 rounded-lg transition-colors"
+              >
+                立即应用
+              </button>
+              <button
+                onClick={() => setShowRestartBanner(false)}
+                className="px-3 py-1.5 text-xs font-medium text-outline hover:text-on-surface transition-colors"
+              >
+                稍后
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Panel 1: Model Config */}
         <div className="bg-[#1E293B] border border-white/5 rounded-2xl p-8 flex flex-col gap-8 shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none" />
-          
+
           {/* API Keys */}
           <section className="relative z-10">
             <div className="flex justify-between items-center mb-6">
@@ -63,14 +229,14 @@ export default function Settings() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="relative group/input">
-                    <input 
-                      type={showKey ? 'text' : 'password'} 
+                    <input
+                      type={showKey ? 'text' : 'password'}
                       value="sk-proj-a1b2c3d4e5f6g7h8i9j0"
                       readOnly
                       className="w-full bg-[#0F172A] border border-outline-variant/40 rounded-lg pl-9 pr-12 py-2.5 font-mono text-[13px] text-on-surface focus:outline-none focus:border-primary/50 transition-all shadow-inner"
                     />
                     <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-outline/50" />
-                    <button 
+                    <button
                       onClick={() => setShowKey(!showKey)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-outline/50 hover:text-primary transition-colors"
                     >
@@ -98,14 +264,33 @@ export default function Settings() {
                   </div>
                 </div>
                 <div className="flex-1 bg-[#0F172A] border border-outline-variant/40 rounded-lg px-4 py-2.5 flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(78,222,163,0.6)]" />
-                  <span className="font-mono text-[13px] text-on-surface-variant flex-1">http://localhost:11434</span>
-                  <span className="font-label text-[10px] text-secondary bg-secondary/10 px-2 py-0.5 rounded border border-secondary/20">已连接</span>
+                  <div className={cn(
+                    "w-2 h-2 rounded-full shadow-[0_0_8px_rgba(78,222,163,0.6)]",
+                    connectionStatus === 'connected' ? "bg-secondary" : connectionStatus === 'failed' ? "bg-error" : connectionStatus === 'testing' ? "bg-tertiary animate-pulse" : "bg-white/30"
+                  )} />
+                  <input
+                    type="text"
+                    value={ollamaUrl}
+                    onChange={(e) => { setOllamaUrl(e.target.value); setOllamaUrlError(null); }}
+                    className="font-mono text-[13px] text-on-surface-variant flex-1 bg-transparent border-none outline-none focus:text-on-surface"
+                  />
+                  {connectionStatus === 'connected' && (
+                    <span className="font-label text-[10px] text-secondary bg-secondary/10 px-2 py-0.5 rounded border border-secondary/20">已连接</span>
+                  )}
+                  {ollamaUrlError && (
+                    <span className="text-[10px] text-error">{ollamaUrlError}</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
-                   <div className="w-10 h-5 bg-primary rounded-full relative shadow-inner cursor-pointer">
-                    <div className="absolute right-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow" />
-                  </div>
+                  <button
+                    onClick={testOllamaConnection}
+                    disabled={connectionStatus === 'testing'}
+                    className="text-[11px] font-label uppercase tracking-widest px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                  >
+                    {connectionStatus === 'testing' ? (
+                      <span className="flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> 测试中</span>
+                    ) : connectionStatus === 'connected' ? '重测' : '测试连接'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -122,7 +307,10 @@ export default function Settings() {
                 </div>
                 全局推理参数
               </h3>
-              <button className="text-outline hover:text-on-surface p-1.5 rounded-lg hover:bg-white/5 transition-colors">
+              <button
+                onClick={() => { setTemp(0.7); setTopP(0.9); }}
+                className="text-outline hover:text-on-surface p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+              >
                 <RefreshCw size={18} />
               </button>
             </div>
@@ -135,17 +323,17 @@ export default function Settings() {
                     <label className="font-display font-bold text-[14px] text-on-surface block mb-1">Temperature (温度)</label>
                     <span className="text-[11px] text-on-surface-variant/70 font-sans tracking-tight">控制输出的随机性与创造力</span>
                   </div>
-                  <span className="font-mono text-[13px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-md border border-primary/20 min-w-[3rem] text-center">{temp}</span>
+                  <span className="font-mono text-[13px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-md border border-primary/20 min-w-[3rem] text-center">{temp.toFixed(1)}</span>
                 </div>
                 <div className="relative pt-1 pb-6">
-                  <input 
-                    type="range" 
-                    min={0} 
-                    max={2} 
-                    step={0.1} 
-                    value={temp} 
+                  <input
+                    type="range"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={temp}
                     onChange={(e) => setTemp(parseFloat(e.target.value))}
-                    className="w-full h-1.5 bg-[#0F172A] rounded-full appearance-none cursor-pointer accent-primary border border-white/5" 
+                    className="w-full h-1.5 bg-[#0F172A] rounded-full appearance-none cursor-pointer accent-primary border border-white/5"
                   />
                   <div className="absolute w-full flex justify-between top-6 font-mono text-[10px] text-outline/50 px-1">
                     <span>0.0 (确定)</span>
@@ -162,17 +350,17 @@ export default function Settings() {
                     <label className="font-display font-bold text-[14px] text-on-surface block mb-1">Top-P</label>
                     <span className="text-[11px] text-on-surface-variant/70 font-sans tracking-tight">核采样，限制候选词汇范围</span>
                   </div>
-                  <span className="font-mono text-[13px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-md border border-primary/20 min-w-[3rem] text-center">{topP}</span>
+                  <span className="font-mono text-[13px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-md border border-primary/20 min-w-[3rem] text-center">{topP.toFixed(2)}</span>
                 </div>
                 <div className="relative pt-1 pb-6">
-                  <input 
-                    type="range" 
-                    min={0} 
-                    max={1} 
-                    step={0.05} 
-                    value={topP} 
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={topP}
                     onChange={(e) => setTopP(parseFloat(e.target.value))}
-                    className="w-full h-1.5 bg-[#0F172A] rounded-full appearance-none cursor-pointer accent-primary border border-white/5" 
+                    className="w-full h-1.5 bg-[#0F172A] rounded-full appearance-none cursor-pointer accent-primary border border-white/5"
                   />
                   <div className="absolute w-full flex justify-between top-6 font-mono text-[10px] text-outline/50 px-1">
                     <span>0.0</span>
@@ -185,10 +373,14 @@ export default function Settings() {
               <div className="space-y-3">
                 <label className="font-display font-bold text-[14px] text-on-surface block">Context Length (上下文窗口)</label>
                 <div className="relative">
-                  <select className="w-full bg-[#0F172A] border border-outline-variant/40 rounded-lg p-2.5 font-mono text-sm text-on-surface focus:outline-none focus:border-primary/50 appearance-none shadow-inner">
-                    <option>4096 (4k)</option>
-                    <option selected>8192 (8k)</option>
-                    <option>32768 (32k)</option>
+                  <select
+                    value={contextWindow}
+                    onChange={(e) => setContextWindow(parseInt(e.target.value))}
+                    className="w-full bg-[#0F172A] border border-outline-variant/40 rounded-lg p-2.5 font-mono text-sm text-on-surface focus:outline-none focus:border-primary/50 appearance-none shadow-inner"
+                  >
+                    <option value={4096}>4096 (4k)</option>
+                    <option value={8192}>8192 (8k)</option>
+                    <option value={32768}>32768 (32k)</option>
                   </select>
                   <ChevronDown size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none" />
                 </div>
@@ -207,13 +399,32 @@ export default function Settings() {
 
         {/* Panel 2: General Settings */}
         <div className="bg-[#1E293B] border border-white/5 rounded-2xl p-8 shadow-2xl space-y-6">
-          <h3 className="font-display text-xl font-bold text-on-surface flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-secondary/10 flex items-center justify-center border border-secondary/20">
-              <SettingsIcon className="text-secondary" size={18} />
-            </div>
-            通用设置
-          </h3>
-          
+          <div className="flex justify-between items-center">
+            <h3 className="font-display text-xl font-bold text-on-surface flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-secondary/10 flex items-center justify-center border border-secondary/20">
+                <SettingsIcon className="text-secondary" size={18} />
+              </div>
+              通用设置
+            </h3>
+            <button
+              onClick={handleSaveSettings}
+              disabled={saveStatus === 'saving'}
+              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              {saveStatus === 'saving' ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  保存中...
+                </>
+              ) : (
+                <>
+                  <Save size={16} />
+                  保存设置
+                </>
+              )}
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-3">
               <label className="font-display font-bold text-[14px] text-on-surface block">工作目录 (Workspace)</label>
@@ -221,10 +432,12 @@ export default function Settings() {
                 <div className="bg-surface-container-highest flex items-center px-3 text-outline group-hover:text-primary transition-colors">
                   <FolderOpen size={16} />
                 </div>
-                <div className="flex-1 bg-[#0F172A] py-2.5 px-4 font-mono text-sm text-on-surface truncate cursor-default">
-                  ~/DigitalCrew/workspace
-                </div>
-                <button className="bg-surface-container-highest px-4 text-[11px] font-label uppercase tracking-widest text-on-surface-variant hover:text-on-surface transition-colors">更改</button>
+                <input
+                  type="text"
+                  value={workspaceDir}
+                  onChange={(e) => setWorkspaceDir(e.target.value)}
+                  className="flex-1 bg-[#0F172A] py-2.5 px-4 font-mono text-sm text-on-surface truncate outline-none focus:text-on-surface"
+                />
               </div>
             </div>
 
@@ -234,11 +447,109 @@ export default function Settings() {
                 <div className="absolute left-3 top-1/2 -translate-y-1/2 text-outline flex items-center gap-2">
                   <Languages size={18} />
                 </div>
-                <select className="w-full bg-[#0F172A] border border-outline-variant/40 rounded-lg pl-10 pr-3 py-2.5 font-sans text-sm text-on-surface focus:outline-none focus:border-primary/50 appearance-none shadow-inner">
-                  <option selected>简体中文</option>
-                  <option>English</option>
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="w-full bg-[#0F172A] border border-outline-variant/40 rounded-lg pl-10 pr-3 py-2.5 font-sans text-sm text-on-surface focus:outline-none focus:border-primary/50 appearance-none shadow-inner"
+                >
+                  <option value="zh">简体中文</option>
+                  <option value="en">English</option>
                 </select>
                 <ChevronDown size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none" />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="font-display font-bold text-[14px] text-on-surface block">沙箱超时 (Sandbox Timeout)</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={10}
+                  max={300}
+                  value={sandboxTimeout}
+                  onChange={(e) => setSandboxTimeout(parseInt(e.target.value) || 60)}
+                  className="w-24 bg-[#0F172A] border border-outline-variant/40 rounded-lg px-3 py-2.5 font-mono text-sm text-on-surface text-center shadow-inner"
+                />
+                <span className="text-sm text-on-surface-variant">秒</span>
+                <div className="flex gap-1 ml-2">
+                  {[30, 60, 120].map((val) => (
+                    <button
+                      key={val}
+                      onClick={() => setSandboxTimeout(val)}
+                      className={cn(
+                        "px-2 py-1 rounded text-[11px] font-mono transition-colors",
+                        sandboxTimeout === val
+                          ? "bg-primary/20 text-primary border border-primary/40"
+                          : "bg-[#0F172A] text-outline border border-outline-variant/30 hover:text-on-surface"
+                      )}
+                    >
+                      {val}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="font-display font-bold text-[14px] text-on-surface block">最大并发 Agent 数</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  value={maxConcurrentAgents}
+                  onChange={(e) => setMaxConcurrentAgents(parseInt(e.target.value))}
+                  className="flex-1 h-1.5 bg-[#0F172A] rounded-full appearance-none cursor-pointer accent-primary"
+                />
+                <span className="font-mono text-sm font-bold text-primary bg-primary/10 px-3 py-1 rounded border border-primary/20 min-w-[3rem] text-center">
+                  {maxConcurrentAgents}
+                </span>
+              </div>
+              <div className="flex justify-between font-mono text-[10px] text-outline/50">
+                <span>1</span>
+                <span>10</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="font-display font-bold text-[14px] text-on-surface block">隐私与反馈</label>
+              <div className="flex flex-col gap-3">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <div
+                    onClick={() => setErrorReporting(!errorReporting)}
+                    className={cn(
+                      "w-10 h-5 rounded-full relative transition-colors shadow-inner cursor-pointer",
+                      errorReporting ? "bg-primary" : "bg-[#0F172A] border border-outline-variant/40"
+                    )}
+                  >
+                    <div className={cn(
+                      "absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all",
+                      errorReporting ? "right-0.5" : "left-0.5"
+                    )} />
+                  </div>
+                  <div>
+                    <span className="text-sm text-on-surface block">错误报告</span>
+                    <span className="text-[10px] text-on-surface-variant/60">自动发送错误日志以改进产品</span>
+                  </div>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <div
+                    onClick={() => setAnonymousStats(!anonymousStats)}
+                    className={cn(
+                      "w-10 h-5 rounded-full relative transition-colors shadow-inner cursor-pointer",
+                      anonymousStats ? "bg-primary" : "bg-[#0F172A] border border-outline-variant/40"
+                    )}
+                  >
+                    <div className={cn(
+                      "absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all",
+                      anonymousStats ? "right-0.5" : "left-0.5"
+                    )} />
+                  </div>
+                  <div>
+                    <span className="text-sm text-on-surface block">匿名统计</span>
+                    <span className="text-[10px] text-on-surface-variant/60">发送匿名使用统计数据</span>
+                  </div>
+                </label>
               </div>
             </div>
           </div>
@@ -252,55 +563,97 @@ export default function Settings() {
             <h3 className="font-display text-lg font-bold text-on-surface flex items-center gap-2">
               <Activity className="text-secondary" size={20} /> 资源看板
             </h3>
-            <span className="w-2.5 h-2.5 rounded-full bg-secondary animate-pulse shadow-[0_0_10px_rgba(78,222,163,0.5)]" />
+            <button
+              onClick={() => fetchResources()}
+              className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+            >
+              <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+            </button>
           </div>
 
-          {[
-            { label: '处理器占用', value: 24, unit: '%', type: 'CPU', color: 'primary', icon: Cpu },
-            { label: '图形运算', value: 41, unit: '%', type: 'GPU', color: 'tertiary', icon: Zap },
-            { label: '系统内存', value: 12.4, unit: 'GB', type: 'RAM', color: 'secondary', icon: DatabaseZap }
-          ].map((item, i) => (
-            <div key={i} className="p-4 rounded-xl bg-[#0F172A] border border-outline-variant/20 relative overflow-hidden group">
-               <div className="flex justify-between items-end mb-4 relative z-10">
-                 <div>
-                    <div className="font-label text-[10px] text-outline uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                      <item.icon size={11} className={`text-${item.color}`} /> {item.label}
+          {resources ? (
+            <>
+              {[
+                { label: '处理器占用', value: resources.cpu_percent, unit: '%', type: 'CPU', color: 'primary', icon: Cpu },
+                { label: '图形运算', value: resources.gpu_percent, unit: '%', type: 'GPU', color: 'tertiary', icon: Zap },
+                { label: '系统内存', value: resources.memory_used_gb, unit: 'GB', type: 'RAM', color: 'secondary', icon: DatabaseZap }
+              ].map((item, i) => (
+                <div key={i} className="p-4 rounded-xl bg-[#0F172A] border border-outline-variant/20 relative overflow-hidden group">
+                  <div className="flex justify-between items-end mb-4 relative z-10">
+                    <div>
+                      <div className="font-label text-[10px] text-outline uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                        <item.icon size={11} /> {item.label}
+                      </div>
+                      <div className="font-mono text-2xl font-bold text-on-surface">
+                        {item.type === 'RAM' ? formatMemory(item.value) : item.value}
+                        <span className="text-sm text-outline/50 ml-0.5">{item.unit}</span>
+                      </div>
                     </div>
-                    <div className="font-mono text-2xl font-bold text-on-surface">
-                      {item.value}<span className="text-sm text-outline/50 ml-0.5">{item.unit}</span>
+                    <div className="w-12 h-12 relative flex items-center justify-center">
+                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                        <circle cx="18" cy="18" r="16" fill="none" className="stroke-white/5" strokeWidth="2.5" />
+                        <circle
+                          cx="18"
+                          cy="18"
+                          r="16"
+                          fill="none"
+                          className="stroke-secondary"
+                          strokeWidth="2.5"
+                          strokeDasharray="100"
+                          strokeDashoffset={100 - (item.type === 'RAM' ? (resources.memory_percent) : item.value)}
+                          strokeLinecap="round"
+                        />
+                      </svg>
                     </div>
-                 </div>
-                 <div className="w-12 h-12 relative flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                      <circle cx="18" cy="18" r="16" fill="none" className="stroke-white/5" strokeWidth="2.5" />
-                      <circle cx="18" cy="18" r="16" fill="none" className={`stroke-${item.color}`} strokeWidth="2.5" strokeDasharray="100" strokeDashoffset={100 - (item.value * (item.unit === '%' ? 1 : 100/32))} strokeLinecap="round" />
-                    </svg>
-                 </div>
-               </div>
-               
-               {item.type === 'RAM' ? (
-                 <div className="space-y-1.5">
-                    <div className="w-full h-1 bg-white/5 rounded-full">
-                      <div className="h-full bg-secondary rounded-full" style={{ width: '38%' }} />
+                  </div>
+
+                  {item.type === 'RAM' ? (
+                    <div className="space-y-1.5">
+                      <div className="w-full h-1 bg-white/5 rounded-full">
+                        <div className="h-full bg-secondary rounded-full" style={{ width: `${resources.memory_percent}%` }} />
+                      </div>
+                      <div className="flex justify-between font-mono text-[9px] text-outline/40">
+                        <span>已使用</span>
+                        <span>{resources.memory_total_gb.toFixed(1)} GB 总计</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between font-mono text-[9px] text-outline/40">
-                      <span>已使用</span>
-                      <span>32.0 GB 总计</span>
+                  ) : (
+                    <div className="h-6 flex items-end gap-1 opacity-40">
+                      {[3, 5, 2, 8, 4, 3, 7, 5, 4, 6].map((h, j) => (
+                        <div key={j} className="flex-1 rounded-t-sm bg-secondary" style={{ height: `${h * 10}%` }} />
+                      ))}
                     </div>
-                 </div>
-               ) : (
-                 <div className="h-6 flex items-end gap-1 opacity-40">
-                    {[3, 5, 2, 8, 4, 3, 7, 5, 4, 6].map((h, j) => (
-                      <div key={j} className={cn("flex-1 rounded-t-sm", `bg-${item.color}`)} style={{ height: `${h * 10}%` }} />
-                    ))}
-                 </div>
-               )}
+                  )}
+                </div>
+              ))}
+
+              {/* Ollama Models */}
+              {resources.ollama_models && resources.ollama_models.length > 0 && (
+                <div className="space-y-2">
+                  <div className="font-label text-[10px] text-outline uppercase tracking-widest">已加载模型</div>
+                  {resources.ollama_models.map((model: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between py-2 px-3 bg-[#0F172A] rounded-lg border border-outline-variant/20">
+                      <span className="font-mono text-[12px] text-on-surface">{model.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px] text-outline">{model.size}</span>
+                        {model.loaded && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-secondary shadow-[0_0_6px_rgba(78,222,163,0.8)]" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 size={24} className="animate-spin text-outline" />
             </div>
-          ))}
+          )}
 
           <button className="w-full py-3 mt-2 border border-outline-variant/20 rounded-xl text-[12px] font-bold text-on-surface uppercase tracking-widest hover:bg-white/5 hover:border-outline-variant/40 transition-all flex items-center justify-center gap-2">
-             <RefreshCw size={14} className="text-primary" />
-             <span>释放闲置资源</span>
+            <RefreshCw size={14} className="text-primary" />
+            <span>释放闲置资源</span>
           </button>
         </div>
       </div>
@@ -308,7 +661,7 @@ export default function Settings() {
   );
 }
 
-const DatabaseZap = ({ size, className }: { size?: number, className?: string }) => (
+const DatabaseZap = ({ size, className }: { size?: number; className?: string }) => (
   <svg width={size || 24} height={size || 24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <ellipse cx="12" cy="5" rx="9" ry="3" />
     <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />

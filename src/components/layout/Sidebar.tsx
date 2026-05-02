@@ -1,14 +1,15 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  Users, 
-  MessageSquare, 
-  ClipboardList, 
-  BarChart3, 
+import {
+  Users,
+  MessageSquare,
+  ClipboardList,
+  BarChart3,
   Settings as SettingsIcon,
   Terminal,
   HelpCircle,
-  ShieldCheck
+  ShieldCheck,
+  BookOpen,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -17,7 +18,7 @@ export default function Sidebar() {
     { name: '团队概览', icon: Users, path: '/' },
     { name: '聊天面板', icon: MessageSquare, path: '/chat' },
     { name: '任务中心', icon: ClipboardList, path: '/audit' },
-    { name: '资源监控', icon: BarChart3, path: '/monitoring' },
+    { name: '知识库', icon: BookOpen, path: '/knowledge' },
     { name: '设置', icon: SettingsIcon, path: '/settings' },
   ];
 
