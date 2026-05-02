@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1
+FROM node:20-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm install
+
+# Copy source
+COPY . .
+
+# Build
+RUN npm run build
+
+# Use serve to serve the static build
+EXPOSE 3000
+CMD ["npx", "serve", "-s", "dist", "-l", "3000"]
