@@ -12,6 +12,7 @@ import structlog
 from backend.models.schemas import Task, TaskStatus, ReActStep
 from backend.services.agent_manager import agent_manager
 from backend.services.supervisor import supervisor_runtime
+from backend.services.task_store import task_store
 
 logger = structlog.get_logger()
 
@@ -44,6 +45,28 @@ class TaskScheduler:
             e: [] for e in TaskEvent
         }
         self._task_locks: dict[str, asyncio.Lock] = {}
+        self._load()
+
+    def _load(self):
+        """Restore tasks from persistent store on startup."""
+        persisted = task_store.load_all()
+        restored = 0
+        for task in persisted:
+            if task.status == TaskStatus.RUNNING:
+                # Can't recover mid-execution — mark as failed
+                task.status = TaskStatus.FAILED
+                task.error_message = "Server restarted during execution"
+                task.completed_at = datetime.utcnow()
+                task_store.save(task)
+            elif task.status in (TaskStatus.PENDING, TaskStatus.ASSIGNED, TaskStatus.PAUSED):
+                self._tasks[task.id] = task
+                self._task_locks[task.id] = asyncio.Lock()
+                if task.status == TaskStatus.PENDING:
+                    self._pending_queue.put_nowait((task.priority, task.id))
+                restored += 1
+            # COMPLETED/FAILED/CANCELLED: don't restore (terminal)
+        if restored > 0:
+            logger.info("tasks_restored", count=restored)
 
     async def initialize(self):
         """Start the scheduler."""
@@ -82,6 +105,7 @@ class TaskScheduler:
 
         await self._emit_event(TaskEvent.CREATED, task)
         await self._pending_queue.put((priority, task.id))
+        self._persist(task)
 
         logger.info("task_created", task_id=task.id, description=description[:50])
         return task
@@ -132,6 +156,7 @@ class TaskScheduler:
             task.status = TaskStatus.ASSIGNED
 
         await self._emit_event(TaskEvent.ASSIGNED, task)
+        self._persist(task)
         logger.info("task_assigned", task_id=task_id, agents=agent_ids)
         return task
 
@@ -143,6 +168,7 @@ class TaskScheduler:
             task.started_at = datetime.utcnow()
 
         await self._emit_event(TaskEvent.STARTED, task)
+        self._persist(task)
         logger.info("task_started", task_id=task_id)
         return task
 
@@ -155,6 +181,7 @@ class TaskScheduler:
             task.output_data = output_data
 
         await self._emit_event(TaskEvent.COMPLETED, task)
+        self._persist(task)
         logger.info("task_completed", task_id=task_id, duration_ms=self._get_duration(task))
         return task
 
@@ -167,6 +194,7 @@ class TaskScheduler:
             task.error_message = error_message
 
         await self._emit_event(TaskEvent.FAILED, task)
+        self._persist(task)
         logger.error("task_failed", task_id=task_id, error=error_message)
         return task
 
@@ -183,6 +211,7 @@ class TaskScheduler:
             del self._running_tasks[task_id]
 
         await self._emit_event(TaskEvent.CANCELLED, task)
+        self._persist(task)
         logger.info("task_cancelled", task_id=task_id)
         return task
 
@@ -193,6 +222,7 @@ class TaskScheduler:
             task.status = TaskStatus.PAUSED
 
         await self._emit_event(TaskEvent.PAUSED, task)
+        self._persist(task)
         logger.info("task_paused", task_id=task_id)
         return task
 
@@ -208,6 +238,7 @@ class TaskScheduler:
                 task.input_data["user_intervention"] = user_input
 
         await self._emit_event(TaskEvent.STARTED, task)
+        self._persist(task)
         logger.info("task_resumed", task_id=task_id, has_user_input=user_input is not None)
         return task
 
@@ -269,6 +300,13 @@ class TaskScheduler:
                     callback(payload)
             except Exception as e:
                 logger.error("event_callback_failed", event=event, error=str(e))
+
+    def _persist(self, task: Task):
+        """Persist task state to SQLite."""
+        try:
+            task_store.save(task)
+        except Exception as e:
+            logger.error("task_persist_failed", task_id=task.id, error=str(e))
 
     async def request_confirmation(
         self, task_id: str, tool_name: str, params: dict

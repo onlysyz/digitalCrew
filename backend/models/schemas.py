@@ -72,6 +72,7 @@ class AgentConfig(BaseModel):
     description: str = ""
     tags: list[str] = Field(default_factory=list)
     role: AgentRole = AgentRole.WORKER
+    capabilities: list[str] = Field(default_factory=list)  # e.g. ["code", "research", "write"]
     llm_config: ModelConfig = Field(default_factory=lambda: ModelConfig())
     system_prompt: str = ""
     tool_permissions: list[ToolPermission] = Field(default_factory=list)
@@ -130,6 +131,7 @@ class ChatSession(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    thread_id: Optional[str] = None  # Active supervisor thread_id for this session
 
 
 class KnowledgeBase(BaseModel):

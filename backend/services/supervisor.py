@@ -118,7 +118,7 @@ class SupervisorRuntime:
                     "error": "error",
                 }
                 legacy_type = type_map.get(event.type, event.type)
-                out = {"type": legacy_type, **event_dict}
+                out = {"type": legacy_type, "thread_id": thread_id, **event_dict}
                 logger.info("supervisor_emit", event_type=event.type, legacy_type=legacy_type, out_type=out.get("type"))
                 # Yield the dict so engine can iterate and yield all events
                 yield out
@@ -130,6 +130,8 @@ class SupervisorRuntime:
             engine.add_node("integrate", integrate_node)
             engine.add_edge("plan", route_after_plan)
             engine.add_edge("execute", route_after_execute)
+            engine.add_interrupt("plan")  # Allow user to intervene after plan is drafted
+            engine.add_interrupt("execute")  # Allow user to intervene during execution
 
             async for event in engine.execute(initial_state, emit):
                 if self._is_cancelled(task_id):

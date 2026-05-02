@@ -203,6 +203,7 @@ async def chat_team_stream(request: ChatRequest):
     async def event_generator():
         # Create session
         session = session_store.get_or_create(session_id)
+        session.thread_id = None  # Will be set when first event arrives
 
         # Add user message
         user_msg = ChatMessage(role="user", content=request.message)
@@ -259,6 +260,10 @@ async def chat_team_stream(request: ChatRequest):
                 available_agents=target_agents,
                 task_id=task.id,
             ):
+                # Capture thread_id from first event and persist to session
+                if session.thread_id is None and event.get("thread_id"):
+                    session.thread_id = event["thread_id"]
+                    session_store.update(session)
                 # Forward supervisor events as SSE
                 yield f"data: {json_dumps_safe(event)}\n\n"
                 # Collect final output and results
@@ -305,18 +310,21 @@ async def intervene_chat(session_id: str, request: InterveneRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    if not session.thread_id:
+        raise HTTPException(status_code=400, detail="No active supervisor thread for this session")
+
     # Add user intervention message
     user_msg = ChatMessage(role="user", content=f"[介入] {request.message}")
     session.messages.append(user_msg)
     session_store.update(session)
 
-    # Submit intervention to supervisor runtime
-    supervisor_runtime.submit_intervention(session_id, {
+    # Submit intervention keyed by thread_id so engine._wait_for_resume can find it
+    supervisor_runtime.submit_intervention(session.thread_id, {
         "message": request.message,
         "session_id": session_id,
     })
 
-    return {"message": "Intervention submitted", "session_id": session_id}
+    return {"message": "Intervention submitted", "session_id": session_id, "thread_id": session.thread_id}
 
 
 @router.get("/sessions")

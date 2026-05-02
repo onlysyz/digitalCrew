@@ -60,7 +60,9 @@ class SessionStore:
                         if msg.get("metadata") is None:
                             msg["metadata"] = {}
                         if msg.get("agent_id") is None:
-                            msg["agent_id"] = None  # already None, just explicit
+                            msg["agent_id"] = None
+                    if session_data.get("thread_id") is None:
+                        session_data["thread_id"] = None
                     self._sessions[sid] = ChatSession(**session_data)
             logger.info("sessions_loaded", count=len(self._sessions))
         except Exception as e:
@@ -89,6 +91,7 @@ class SessionStore:
                     ],
                     "created_at": session.created_at.isoformat(),
                     "updated_at": session.updated_at.isoformat(),
+                    "thread_id": session.thread_id,
                 }
 
             # Atomic write: write to temp file, then rename

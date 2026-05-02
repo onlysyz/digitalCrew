@@ -13,14 +13,18 @@ import {
   Loader2,
   X,
   CheckCircle2,
+  Clock,
   Copy,
   Check,
   RefreshCw,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
 import { useChatStore } from '../stores/chatStore';
 import { useAgentStore } from '../stores/agentStore';
+import { useThreadStore } from '../stores/threadStore';
 import type { ChatMessage, ReActStep, ExecutionPlan } from '../types/api';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7700/api/v1';
@@ -28,7 +32,8 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7700/api/
 type ChatMode = 'single' | 'team';
 
 interface StreamEvent {
-  type: 'message' | 'status' | 'task_created' | 'subtask_start' | 'subtask_complete' | 'subtask_error' | 'subtask_token' | 'result' | 'error' | 'done' | 'agents_assigned' | 'react_step' | 'cancelled';
+  type: 'message' | 'status' | 'task_created' | 'subtask_start' | 'subtask_complete' | 'subtask_error' | 'subtask_token' | 'result' | 'error' | 'done' | 'agents_assigned' | 'react_step' | 'cancelled' | 'interrupt';
+  thread_id?: string;
   content?: string;
   task_id?: string;
   subtask_id?: string;
@@ -58,14 +63,8 @@ export default function ChatPanel() {
   const [input, setInput] = useState('');
   const [chatMode, setChatMode] = useState<ChatMode>('team');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [executionPlan, setExecutionPlan] = useState<ExecutionPlan | null>(null);
-  const [reactSteps, setReactSteps] = useState<ReActStep[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string>('');
-  const [assignedAgents, setAssignedAgents] = useState<AssignedAgent[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
@@ -73,7 +72,35 @@ export default function ChatPanel() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { messages, isSending, sendMessage, sendTeamMessage, setCurrentSession, currentSessionId } = useChatStore();
+  // Thread/streaming state from store
+  const {
+    isStreaming,
+    streamingMessageId,
+    assignedAgents,
+    statusMessage,
+    executionPlan,
+    reactSteps,
+    currentTaskId,
+    setTaskId,
+    setStatusMessage,
+    setExecutionPlan,
+    startStreaming,
+    stopStreaming,
+    setAssignedAgents,
+    clearReactSteps,
+    setStreamingMessageId,
+    updateAgent,
+    addReactStep,
+    applyEvent,
+    isInterrupted,
+    interruptThreadId,
+    interruptMessage,
+    clearInterrupt,
+    setInterruptMessage,
+  } = useThreadStore();
+
+  // Get missing functions from chatStore
+  const { messages, isSending, sendMessage, setCurrentSession, currentSessionId } = useChatStore();
   const { agents, fetchAgents } = useAgentStore();
 
   useEffect(() => {
@@ -82,7 +109,7 @@ export default function ChatPanel() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, assignedAgents, isStreaming]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -123,7 +150,7 @@ export default function ChatPanel() {
     const userMessage = (input.trim() + filePart).trim();
     setInput('');
     setExecutionPlan(null);
-    setReactSteps([]);
+    clearReactSteps();
     setStatusMessage('');
     setAssignedAgents([]);
 
@@ -138,12 +165,21 @@ export default function ChatPanel() {
   };
 
   const handleTeamStream = async (message: string) => {
-    setIsStreaming(true);
     const sessionId = currentSessionId || crypto.randomUUID();
     setCurrentSession(sessionId, false);
 
-    // Add user message to store
+    // Create placeholder streaming message first
+    const streamingMsgId = crypto.randomUUID();
+    setStreamingMessageId(streamingMsgId);
+    startStreaming(streamingMsgId);
     const userMsg: ChatMessage = {
+      id: streamingMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      metadata: { is_streaming: true },
+    };
+    const placeholderMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       content: message,
@@ -151,7 +187,7 @@ export default function ChatPanel() {
       metadata: {},
     };
     useChatStore.setState((state) => ({
-      messages: [...state.messages, userMsg],
+      messages: [...state.messages, userMsg, placeholderMsg],
     }));
 
     // We'll append messages as they come
@@ -190,7 +226,7 @@ export default function ChatPanel() {
     } catch (err) {
       console.error('Stream error:', err);
     } finally {
-      setIsStreaming(false);
+      stopStreaming();
     }
   };
 
@@ -212,30 +248,23 @@ export default function ChatPanel() {
         break;
       case 'task_created':
         if (event.task_id) {
-          setCurrentTaskId(event.task_id);
+          setTaskId(event.task_id);
         }
         setExecutionPlan({
           steps: [{ agent: '初始化', task: '任务已创建', status: 'pending' }],
         });
         break;
       case 'subtask_start':
+        console.log('[ChatPanel] subtask_start:', event.agent_id, event.agent_name);
         if (event.agent_id && event.agent_name) {
-          setAssignedAgents(prev =>
-            prev.map(a =>
-              a.id === event.agent_id ? { ...a, status: 'working' as const } : a
-            )
-          );
+          updateAgent(event.agent_id, { status: 'working' });
           setStatusMessage(`${event.agent_name} 正在工作...`);
         }
         break;
       case 'subtask_complete':
-        // Update agent status to completed
+        console.log('[ChatPanel] subtask_complete:', event.agent_id, event.subtask_id);
         if (event.agent_id) {
-          setAssignedAgents(prev =>
-            prev.map(a =>
-              a.id === event.agent_id ? { ...a, status: 'completed' as const } : a
-            )
-          );
+          updateAgent(event.agent_id, { status: 'completed' });
         }
         if (event.subtask_id && event.output) {
           setExecutionPlan((prev) => {
@@ -243,7 +272,7 @@ export default function ChatPanel() {
             return {
               ...prev,
               steps: [
-                ...prev.steps,
+                ...(prev as any).steps,
                 { agent: event.subtask_id!, task: event.output!, status: 'completed' as const },
               ],
             };
@@ -252,23 +281,16 @@ export default function ChatPanel() {
         break;
       case 'subtask_error':
         if (event.agent_id) {
-          setAssignedAgents(prev =>
-            prev.map(a =>
-              a.id === event.agent_id ? { ...a, status: 'error' as const } : a
-            )
-          );
+          updateAgent(event.agent_id, { status: 'error' });
         }
         break;
       case 'subtask_token':
-        // Incrementally accumulate streaming tokens for display
-        if (event.token) {
-          setAssignedAgents(prev => prev.map(a => {
-            if (a.id === event.agent_id || a.status === 'working') {
-              return { ...a, streamingContent: (a.streamingContent || '') + event.token };
-            }
-            return a;
-          }));
-          // Also update responseText for final message
+        console.log('[ChatPanel] subtask_token event:', event.agent_id, event.token);
+        if (event.token && event.agent_id) {
+          const agent = assignedAgents.find(a => a.id === event.agent_id);
+          if (agent) {
+            updateAgent(event.agent_id, { streamingContent: (agent.streamingContent || '') + event.token });
+          }
           responseText.current += event.token;
         }
         break;
@@ -279,33 +301,37 @@ export default function ChatPanel() {
         responseText.current = event.content || 'An error occurred';
         break;
       case 'done':
-        // Add the final assistant message
-        if (responseText.current) {
-          const assistantMsg: ChatMessage = {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: responseText.current,
-            agent_id: null,
-            timestamp: new Date().toISOString(),
-            metadata: { is_streaming: false },
-          };
+        // Update the placeholder message with final content
+        if (responseText.current || streamingMessageId) {
           useChatStore.setState((state) => ({
-            messages: [...state.messages, assistantMsg],
+            messages: state.messages.map(msg =>
+              msg.id === streamingMessageId
+                ? { ...msg, content: responseText.current, metadata: { is_streaming: false } }
+                : msg
+            ),
           }));
         }
+        setStreamingMessageId(null);
         setStatusMessage('');
-        setCurrentTaskId(null);
+        setTaskId(null);
         setIsCancelling(false);
         break;
       case 'cancelled':
         toast.warning('任务已被取消');
         setStatusMessage('任务已被取消');
-        setCurrentTaskId(null);
+        setTaskId(null);
         setIsCancelling(false);
+        break;
+      case 'interrupt':
+        console.log('[ChatPanel] interrupt event received, thread_id:', event.thread_id);
+        if (event.thread_id) {
+          setStatusMessage('任务已暂停，等待您的指令...');
+          setIsCancelling(false);
+        }
         break;
       case 'react_step':
         if (event.step) {
-          setReactSteps(prev => [...prev, {
+          addReactStep({
             step_id: event.step!.step_id,
             agent_id: event.step!.agent_id,
             thought: event.step!.thought,
@@ -316,7 +342,7 @@ export default function ChatPanel() {
             token_input: 0,
             token_output: 0,
             duration_ms: 0,
-          }]);
+          });
         }
         break;
     }
@@ -342,6 +368,54 @@ export default function ChatPanel() {
       console.error('Cancel request failed:', err);
       setIsCancelling(false);
       toast.error('取消任务失败');
+    }
+  };
+
+  const handleResume = async () => {
+    if (!interruptThreadId) return;
+    setIsCancelling(false);
+    try {
+      const res = await fetch(`${API_BASE_URL}/graph/${interruptThreadId}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: interruptMessage,
+          replan: false,
+        }),
+      });
+      if (res.ok) {
+        toast.success('任务已继续执行');
+        clearInterrupt();
+      } else {
+        toast.error('继续执行失败');
+      }
+    } catch (err) {
+      console.error('Resume request failed:', err);
+      toast.error('继续执行失败');
+    }
+  };
+
+  const handleReplan = async () => {
+    if (!interruptThreadId) return;
+    setIsCancelling(false);
+    try {
+      const res = await fetch(`${API_BASE_URL}/graph/${interruptThreadId}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          replan: true,
+          message: interruptMessage,
+        }),
+      });
+      if (res.ok) {
+        toast.success('已重新规划任务');
+        clearInterrupt();
+      } else {
+        toast.error('重新规划失败');
+      }
+    } catch (err) {
+      console.error('Replan request failed:', err);
+      toast.error('重新规划失败');
     }
   };
 
@@ -477,6 +551,42 @@ export default function ChatPanel() {
             </div>
           )}
 
+          {isInterrupted && (
+            <div className="mx-4 mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+              <div className="flex items-center gap-2 mb-3">
+                <Pause size={16} className="text-amber-400" />
+                <span className="font-sans text-sm font-medium text-amber-400">任务已暂停 — 输入指令继续</span>
+              </div>
+              <textarea
+                value={interruptMessage}
+                onChange={(e) => setInterruptMessage(e.target.value)}
+                placeholder="输入您的指令或修改后的任务描述..."
+                className="w-full bg-surface-container rounded-lg px-3 py-2 text-sm text-on-surface placeholder:text-outline resize-none border border-outline-variant/30 focus:border-amber-500/50 focus:outline-none"
+                rows={3}
+              />
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={handleResume}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[12px] font-medium bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-all"
+                >
+                  <Play size={12} /> 继续执行
+                </button>
+                <button
+                  onClick={handleReplan}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[12px] font-medium bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 transition-all"
+                >
+                  <RefreshCw size={12} /> 重新规划
+                </button>
+                <button
+                  onClick={clearInterrupt}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[12px] font-medium bg-surface-container border border-outline-variant/30 text-outline hover:bg-surface-high transition-all ml-auto"
+                >
+                  忽略
+                </button>
+              </div>
+            </div>
+          )}
+
           {messages.map((msg, idx) => (
             <div key={msg.id || idx} className={cn('flex', msg.role === 'user' ? 'justify-end pr-4' : 'justify-start pl-4')}>
               <div className={cn('max-w-[85%]', msg.role === 'user' ? 'max-w-[70%]' : '')}>
@@ -530,12 +640,13 @@ export default function ChatPanel() {
                     )}
 
                     {/* Live Streaming Output */}
-                    {assignedAgents.length > 0 && assignedAgents.some(a => a.streamingContent) && (
+                    {assignedAgents.length > 0 && (
                       <div className="bg-surface-container/40 border border-primary/10 rounded-lg p-4 mb-5 relative z-10">
                         <div className="flex items-center gap-2 mb-3">
                           <BrainCircuit size={14} className="text-primary" />
                           <h4 className="font-label text-primary/80 text-[11px] uppercase tracking-widest">实时输出</h4>
                         </div>
+                        {assignedAgents.some(a => a.streamingContent) ? (
                         <div className="space-y-2">
                           {assignedAgents.filter(a => a.streamingContent).map((agent, idx) => {
                             const colors = ['text-primary', 'text-secondary', 'text-tertiary', 'text-[#8b5cf6]'];
@@ -549,7 +660,7 @@ export default function ChatPanel() {
                             <div
                               key={agent.id}
                               className={cn(
-                                'rounded-lg border relative overflow-hidden',
+                                'rounded-lg border relative overflow-hidden streaming-fade-in',
                                 agent.status === 'completed' && 'bg-secondary/5 border-secondary/20',
                                 agent.status === 'working' && 'bg-primary/5 border-primary/20',
                                 agent.status === 'pending' && 'bg-white/5 border-white/10'
@@ -581,8 +692,13 @@ export default function ChatPanel() {
                                 )}
                               </button>
                               <div className={cn("px-3 pb-3", isExpanded ? '' : 'max-h-32 overflow-hidden')}>
-                                <div className="font-mono text-[11px] text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words pl-4">
+                                <div className={cn(
+                                  "font-mono text-[11px] text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words pl-4 transition-opacity duration-200",
+                                  agent.status === 'working' && 'streaming-cursor',
+                                  agent.streamingContent && 'token-appear'
+                                )}>
                                   {displayContent}
+                                  {agent.status === 'working' && <span className="animate-pulse">▊</span>}
                                 </div>
                                 {shouldTruncate && !isExpanded && (
                                   <div className="absolute bottom-0 left-4 right-4 h-8 bg-gradient-to-t from-surface-container/80 to-transparent" />
@@ -591,16 +707,76 @@ export default function ChatPanel() {
                             </div>
                           )})}
                         </div>
-                      </div>
-                    )}
+                        ) : (
+                        <div className="space-y-2">
+                          {assignedAgents.slice(0, 3).map((agent, idx) => {
+                            const colors = ['text-primary', 'text-secondary', 'text-tertiary', 'text-[#8b5cf6]'];
+                            const color = colors[idx % colors.length];
+                            return (
+                            <div
+                              key={agent.id}
+                              className={cn(
+                                'rounded-lg border relative overflow-hidden',
+                                agent.status === 'completed' && 'bg-secondary/5 border-secondary/20',
+                                agent.status === 'working' && 'bg-primary/5 border-primary/20',
+                                agent.status === 'pending' && 'bg-white/5 border-white/10'
+                              )}
+                            >
+                              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-primary to-secondary rounded-l" />
+                              <div className="flex items-center gap-2 p-3">
+                                {agent.status === 'completed' && <CheckCircle2 size={12} className="text-secondary" />}
+                                {agent.status === 'working' && <Loader2 size={12} className={cn(color, "animate-spin")} />}
+                                {agent.status === 'pending' && <Clock size={12} className={cn(color, "opacity-50")} />}
+                                <span className={cn("text-[11px] font-medium flex-1 text-left", color)}>{agent.name}</span>
+                                {agent.status === 'working' && (
+                                  <span className={cn("text-[10px]", color, "opacity-70")}>等待输出...</span>
+                                )}
+                                {agent.status === 'pending' && (
+                                  <span className={cn("text-[10px]", color, "opacity-50")}>排队中</span>
+                                )}
+                              </div>
+                              <div className="px-3 pb-3">
+                                <div className="h-3 rounded bg-gradient-to-r from-primary/20 via-secondary/10 to-transparent animate-pulse" />
+                              </div>
+                            </div>
+                          )})}
+                          {assignedAgents.length > 3 && (
+                            <div className="text-center text-[10px] text-outline py-1">
+                              还有 {assignedAgents.length - 3} 个代理正在工作...
+                            </div>
+                          )}
+                        </div>
+                        )}
+                        </div>
+                      )}
 
                     {/* Assigned Agents */}
-                    {assignedAgents.length > 0 && (
+                    {(() => {
+                      if (assignedAgents.length === 0) return null;
+                      const completedCount = assignedAgents.filter(a => a.status === 'completed').length;
+                      const totalCount = assignedAgents.length;
+                      const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+                      return (
                       <div className="bg-surface-container/60 border border-primary/10 rounded-lg p-4 mb-5 relative z-10">
                         <div className="flex items-center justify-between mb-3">
-                          <h4 className="font-label text-primary/80 text-[11px] flex items-center gap-2 uppercase tracking-widest">
-                            <Users size={14} /> 参与的代理 ({assignedAgents.length})
-                          </h4>
+                          <div className="flex items-center gap-3">
+                            <h4 className="font-label text-primary/80 text-[11px] flex items-center gap-2 uppercase tracking-widest">
+                              <Users size={14} /> 参与的代理
+                            </h4>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] font-mono">
+                                <span className="text-secondary font-bold">{completedCount}</span>
+                                <span className="text-outline">/</span>
+                                <span className="text-on-surface">{totalCount}</span>
+                              </span>
+                              <div className="w-16 h-1.5 bg-surface-high rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-secondary to-primary rounded-full transition-all duration-300"
+                                  style={{ width: `${progress}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
                           {(isStreaming || currentTaskId) && !isCancelling && (
                             <button
                               onClick={handleCancel}
@@ -618,19 +794,28 @@ export default function ChatPanel() {
                             <div
                               key={agent.id}
                               className={cn(
-                                'flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-medium border',
+                                'flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-medium border relative overflow-hidden',
                                 agent.status === 'completed' && 'bg-secondary/10 border-secondary/30 text-secondary',
-                                agent.status === 'working' && 'bg-primary/10 border-primary/30 text-primary animate-pulse',
+                                agent.status === 'working' && 'bg-primary/10 border-primary/30 text-primary',
                                 agent.status === 'pending' && 'bg-white/5 border-white/10 text-outline',
                                 agent.status === 'error' && 'bg-red-500/10 border-red-500/30 text-red-400'
                               )}
                             >
+                              {/* Streaming indicator bar */}
+                              {agent.status === 'working' && (
+                                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-primary via-secondary to-primary animate-[shrink-width_1.5s_ease-in-out_infinite]" />
+                              )}
                               {agent.status === 'completed' && <CheckCircle2 size={12} />}
-                              {agent.status === 'working' && <Loader2 size={12} className="animate-spin" />}
+                              {agent.status === 'working' && (
+                                <span className="relative flex items-center gap-1">
+                                  <Loader2 size={12} className="animate-spin text-primary" />
+                                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                                </span>
+                              )}
                               {agent.status === 'error' && <X size={12} />}
                               <span>{agent.name}</span>
                               {agent.status === 'working' && (
-                                <span className="text-primary/60 text-[10px]">工作中...</span>
+                                <span className="text-primary/60 text-[10px] animate-pulse">工作中...</span>
                               )}
                               {agent.status === 'pending' && (
                                 <span className="text-outline/60 text-[10px]">等待中</span>
@@ -645,16 +830,17 @@ export default function ChatPanel() {
                           ))}
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Execution Plan */}
-                    {executionPlan && executionPlan.steps.length > 0 && (
+                    {executionPlan && (executionPlan as { steps: Array<{ status: string; agent: string; task: string }> }).steps.length > 0 && (
                       <div className="bg-surface-container/60 border border-primary/10 rounded-lg p-4 mb-5 relative z-10">
                         <h4 className="font-label text-primary/80 text-[11px] mb-3 flex items-center gap-2 uppercase tracking-widest">
                           <Zap size={14} /> 执行计划
                         </h4>
                         <ul className="font-sans text-[13px] text-on-surface space-y-2">
-                          {executionPlan.steps.map((step, i) => (
+                          {(executionPlan as { steps: Array<{ status: string; agent: string; task: string }> }).steps.map((step, i) => (
                             <li key={i} className="flex items-start gap-3">
                               <div className={cn('mt-1.5 w-1.5 h-1.5 rounded-full', step.status === 'completed' ? 'bg-secondary' : 'bg-tertiary')} />
                               <span>
@@ -683,11 +869,11 @@ export default function ChatPanel() {
                             <div key={i}>
                               <div className="flex gap-2 mb-1">
                                 <span className="text-tertiary font-bold">Thought:</span>
-                                <span>{step.thought}</span>
+                                <span>{(step as { thought: string }).thought}</span>
                               </div>
                               <div className="flex gap-2">
                                 <span className="text-primary font-bold">Action:</span>
-                                <span className="text-blue-400">{step.action}</span>
+                                <span className="text-blue-400">{(step as { action: string }).action}</span>
                               </div>
                             </div>
                           ))}
