@@ -8,7 +8,6 @@ import structlog
 
 from backend.models.schemas import AgentConfig, AgentStatus, AgentRole, ReActStep, Task, ModelConfig
 from backend.services.agent_manager import agent_manager
-from backend.services.task_scheduler import task_scheduler
 from backend.services.llm_router import llm_router, RateLimitError
 from backend.services.graph.state import GraphState, SubAgentContext
 from backend.services.graph.engine import create_default_engine
