@@ -3,9 +3,12 @@ Session persistence service - stores chat sessions to disk
 """
 import json
 import os
+import asyncio
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
+import tempfile
+import shutil
 
 import structlog
 
@@ -15,6 +18,7 @@ logger = structlog.get_logger()
 
 SESSIONS_DIR = Path("/Users/tiankuo/DigitalCrew/data/sessions")
 SESSIONS_FILE = SESSIONS_DIR / "sessions.json"
+AUTO_SAVE_DELAY_SECONDS = 5.0
 
 
 class SessionStore:
@@ -23,7 +27,21 @@ class SessionStore:
     def __init__(self, storage_path: Optional[Path] = None):
         self.storage_path = storage_path or SESSIONS_FILE
         self._sessions: dict[str, ChatSession] = {}
+        self._dirty = False  # True when in-memory state differs from disk
+        self._save_task: Optional[asyncio.Task] = None
         self._load()
+        self._start_autosave()
+
+    def _start_autosave(self):
+        """Start the auto-save loop if an event loop is running."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop at import time (e.g., non-async module load)
+            # Lazy-start on first mutation via _mark_dirty
+            return
+        self._save_task = loop.create_task(self._auto_save_loop())
+        logger.info("session_store_autosave_started", delay=AUTO_SAVE_DELAY_SECONDS)
 
     def _load(self):
         """Load sessions from disk."""
@@ -39,6 +57,10 @@ class SessionStore:
                     session_data["updated_at"] = datetime.fromisoformat(session_data["updated_at"])
                     for msg in session_data.get("messages", []):
                         msg["timestamp"] = datetime.fromisoformat(msg["timestamp"])
+                        if msg.get("metadata") is None:
+                            msg["metadata"] = {}
+                        if msg.get("agent_id") is None:
+                            msg["agent_id"] = None  # already None, just explicit
                     self._sessions[sid] = ChatSession(**session_data)
             logger.info("sessions_loaded", count=len(self._sessions))
         except Exception as e:
@@ -46,7 +68,7 @@ class SessionStore:
             self._sessions = {}
 
     def _save(self):
-        """Save sessions to disk."""
+        """Save sessions to disk atomically (temp file + rename)."""
         try:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             data = {}
@@ -61,15 +83,28 @@ class SessionStore:
                             "content": m.content,
                             "agent_id": m.agent_id,
                             "timestamp": m.timestamp.isoformat(),
-                            "metadata": m.metadata,
+                            "metadata": m.metadata or {},
                         }
                         for m in session.messages
                     ],
                     "created_at": session.created_at.isoformat(),
                     "updated_at": session.updated_at.isoformat(),
                 }
-            with open(self.storage_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            # Atomic write: write to temp file, then rename
+            tmp_fd, tmp_path_str = tempfile.mkstemp(
+                dir=self.storage_path.parent, suffix=".tmp", prefix="sessions_"
+            )
+            tmp_path = Path(tmp_path_str)
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                shutil.move(str(tmp_path), str(self.storage_path))
+            except Exception:
+                # Clean up temp file on failure
+                if tmp_path.exists():
+                    tmp_path.unlink()
+                raise
         except Exception as e:
             logger.error("failed_to_save_sessions", error=str(e))
 
@@ -77,24 +112,38 @@ class SessionStore:
         """Get a session by ID."""
         return self._sessions.get(session_id)
 
+    def _mark_dirty(self):
+        """Mark sessions as needing persist; lazy-start autosave if needed."""
+        self._dirty = True
+        if self._save_task is None:
+            self._start_autosave()
+
+    async def _auto_save_loop(self):
+        """Background loop: flush to disk after inactivity period."""
+        while True:
+            await asyncio.sleep(AUTO_SAVE_DELAY_SECONDS)
+            if self._dirty:
+                self._save()
+                self._dirty = False
+
     def create(self, session: ChatSession) -> ChatSession:
         """Create a new session."""
         self._sessions[session.id] = session
-        self._save()
+        self._mark_dirty()
         return session
 
     def update(self, session: ChatSession) -> ChatSession:
         """Update an existing session."""
         session.updated_at = datetime.utcnow()
         self._sessions[session.id] = session
-        self._save()
+        self._mark_dirty()
         return session
 
     def delete(self, session_id: str) -> bool:
         """Delete a session."""
         if session_id in self._sessions:
             del self._sessions[session_id]
-            self._save()
+            self._mark_dirty()
             return True
         return False
 
@@ -116,7 +165,7 @@ class SessionStore:
             return self._sessions[session_id]
         session = ChatSession(id=session_id, agent_id=agent_id)
         self._sessions[session_id] = session
-        self._save()
+        self._mark_dirty()
         return session
 
 
