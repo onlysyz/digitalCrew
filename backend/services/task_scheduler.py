@@ -11,6 +11,7 @@ import structlog
 
 from backend.models.schemas import Task, TaskStatus, ReActStep
 from backend.services.agent_manager import agent_manager
+from backend.services.supervisor import supervisor_runtime
 
 logger = structlog.get_logger()
 
@@ -309,9 +310,6 @@ class TaskScheduler:
 
     async def _process_task(self, task_id: str):
         """Process a single task from queue to completion."""
-        # Import here to avoid circular import
-        from backend.services.supervisor import supervisor_runtime
-
         try:
             task = await self.get_task(task_id)
             # Skip if already terminal
