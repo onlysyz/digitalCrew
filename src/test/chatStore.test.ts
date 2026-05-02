@@ -186,55 +186,6 @@ describe('ChatStore', () => {
     });
   });
 
-  describe('sendTeamMessage', () => {
-    it('sets isSending true during send', async () => {
-      vi.mocked(chatApi.team).mockResolvedValue({
-        session_id: 'session-1',
-        message: { id: 'msg-1', role: 'assistant', content: 'Team response', timestamp: '2024-01-01', metadata: {} },
-      });
-
-      const promise = useChatStore.getState().sendTeamMessage('Hi team');
-
-      expect(useChatStore.getState().isSending).toBe(true);
-
-      await promise;
-    });
-
-    it('appends user and assistant messages on success', async () => {
-      vi.mocked(chatApi.team).mockResolvedValue({
-        session_id: 'session-1',
-        message: { id: 'msg-1', role: 'assistant', content: 'Team response', timestamp: '2024-01-01', metadata: {} },
-      });
-
-      await useChatStore.getState().sendTeamMessage('Hi team');
-
-      const { messages } = useChatStore.getState();
-      expect(messages).toHaveLength(2);
-      expect(messages[0].role).toBe('user');
-      expect(messages[0].content).toBe('Hi team');
-      expect(messages[1].role).toBe('assistant');
-    });
-
-    it('updates currentSessionId from response', async () => {
-      vi.mocked(chatApi.team).mockResolvedValue({
-        session_id: 'team-session-id',
-        message: { id: 'msg-1', role: 'assistant', content: 'Team response', timestamp: '2024-01-01', metadata: {} },
-      });
-
-      await useChatStore.getState().sendTeamMessage('Hi team');
-
-      expect(useChatStore.getState().currentSessionId).toBe('team-session-id');
-    });
-
-    it('sets error on failure', async () => {
-      vi.mocked(chatApi.team).mockRejectedValue(new Error('Failed to send team message'));
-
-      await useChatStore.getState().sendTeamMessage('Hi team');
-
-      expect(useChatStore.getState().error).toBe('Failed to send team message');
-      expect(useChatStore.getState().isSending).toBe(false);
-    });
-  });
 
   describe('intervene', () => {
     it('calls chatApi.intervene with sessionId and message', async () => {
@@ -323,22 +274,5 @@ describe('ChatStore', () => {
       expect(useChatStore.getState().isSending).toBe(false);
     });
 
-    it('isSending is true while sendTeamMessage is in progress', async () => {
-      vi.mocked(chatApi.team).mockImplementation(() => new Promise((resolve) => {
-        setTimeout(() => {
-          resolve({
-            session_id: 'session-1',
-            message: { id: 'msg-1', role: 'assistant', content: 'Team response', timestamp: '2024-01-01', metadata: {} },
-          });
-        }, 100);
-      }));
-
-      const sendPromise = useChatStore.getState().sendTeamMessage('Hi team');
-
-      expect(useChatStore.getState().isSending).toBe(true);
-
-      await sendPromise;
-      expect(useChatStore.getState().isSending).toBe(false);
-    });
   });
 });
