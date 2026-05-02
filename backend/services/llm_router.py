@@ -164,11 +164,16 @@ class OllamaProvider(LLMProvider):
                             continue
 
 
-class OpenAICompatibleProvider(LLMProvider):
-    """OpenAI-compatible API provider (supports various cloud services)."""
+class MiniMaxProvider(LLMProvider):
+    """MiniMax API provider (Anthropic-compatible API)."""
 
-    def __init__(self, base_url: str = "https://api.openai.com/v1"):
+    def __init__(self, base_url: str = "https://api.minimaxi.com"):
         self.base_url = base_url.rstrip("/")
+
+    def _get_proxy(self) -> Optional[str]:
+        """Get proxy from environment if not connecting to local services."""
+        # Skip proxy for localhost and local IPs
+        return None
 
     def _get_headers(self, api_key: str) -> dict:
         return {
@@ -184,14 +189,137 @@ class OpenAICompatibleProvider(LLMProvider):
         timeout: float = 120.0,
     ) -> dict:
         url = f"{self.base_url}{endpoint}"
+        logger.info("minimax_request", url=url, endpoint=endpoint, base_url=self.base_url)
 
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, proxy=self._get_proxy()) as client:
             try:
                 response = await client.post(
                     url,
                     json=json_data,
                     headers=self._get_headers(api_key),
                 )
+
+                logger.info("minimax_response", status=response.status_code, url=url)
+
+                if response.status_code == 401:
+                    raise LLMError("Invalid API key")
+                if response.status_code == 429:
+                    raise RateLimitError("Rate limited by API provider")
+                if response.status_code != 200:
+                    raise LLMError(f"API error: {response.status_code} {response.text}")
+
+                return response.json()
+
+            except httpx.TimeoutException:
+                raise TimeoutError(f"API request timed out after {timeout}s")
+            except httpx.RequestError as e:
+                raise LLMError(f"Connection error: {str(e)}")
+
+    async def chat(
+        self,
+        messages: list[dict],
+        model_config: ModelConfig,
+        tools: Optional[list[dict]] = None,
+    ) -> dict:
+        # MiniMax uses Anthropic-style /v1/messages endpoint
+        payload = {
+            "model": model_config.model_name,
+            "messages": messages,
+            "max_tokens": model_config.max_output_tokens or 1024,
+        }
+
+        result = await self._make_request(
+            "/v1/messages",
+            api_key=model_config.api_key or "",
+            json_data=payload,
+        )
+
+        # Convert Anthropic response to OpenAI format
+        return {
+            "content": result.get("content", [{}])[0].get("text", ""),
+            "model": result.get("model", model_config.model_name),
+            "usage": result.get("usage", {}),
+            "tool_calls": [],
+        }
+
+    async def stream_chat(
+        self,
+        messages: list[dict],
+        model_config: ModelConfig,
+        tools: Optional[list[dict]] = None,
+    ) -> AsyncIterator[dict]:
+        payload = {
+            "model": model_config.model_name,
+            "messages": messages,
+            "max_tokens": model_config.max_output_tokens or 1024,
+            "stream": True,
+        }
+
+        url = f"{self.base_url}/v1/messages"
+
+        async with httpx.AsyncClient(timeout=120.0, proxy=self._get_proxy()) as client:
+            async with client.stream(
+                "POST", url, json=payload, headers=self._get_headers(model_config.api_key or "")
+            ) as response:
+                if response.status_code != 200:
+                    error_text = await response.atext()
+                    raise LLMError(f"Stream error: {response.status_code} {error_text}")
+
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            yield {"done": True, "content": ""}
+                            return
+                        try:
+                            import json
+                            data = json.loads(data_str)
+                            if data.get("type") == "content_block_delta":
+                                yield {
+                                    "content": data.get("delta", {}).get("text", ""),
+                                    "done": False,
+                                    "tool_calls": [],
+                                }
+                        except (json.JSONDecodeError, KeyError):
+                            continue
+
+
+class OpenAICompatibleProvider(LLMProvider):
+    """OpenAI-compatible API provider (supports various cloud services)."""
+
+    def __init__(self, base_url: str = "https://api.openai.com/v1"):
+        self.base_url = base_url.rstrip("/")
+
+    def _get_proxy(self) -> Optional[str]:
+        """Get proxy from environment if not connecting to local services."""
+        # Skip proxy for localhost and local IPs
+        return None
+
+    def _get_headers(self, api_key: str) -> dict:
+        return {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+    async def _make_request(
+        self,
+        endpoint: str,
+        api_key: str,
+        json_data: Optional[dict] = None,
+        timeout: float = 120.0,
+    ) -> dict:
+        url = f"{self.base_url}{endpoint}"
+        logger.info("minimax_request", url=url, endpoint=endpoint, base_url=self.base_url)
+
+        async with httpx.AsyncClient(timeout=timeout, proxy=self._get_proxy()) as client:
+            try:
+                response = await client.post(
+                    url,
+                    json=json_data,
+                    headers=self._get_headers(api_key),
+                )
+
+                logger.info("minimax_response", status=response.status_code, url=url)
 
                 if response.status_code == 401:
                     raise LLMError("Invalid API key")
@@ -258,7 +386,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
         url = f"{self.base_url}/chat/completions"
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=120.0, proxy=self._get_proxy()) as client:
             async with client.stream(
                 "POST", url, json=payload, headers=self._get_headers(model_config.api_key or "")
             ) as response:
@@ -376,10 +504,34 @@ class LLMRouter:
                 return {"success": True, "models": models}
             except Exception as e:
                 return {"success": False, "error": str(e)}
+        elif provider == "minimax":
+            p = MiniMaxProvider(base_url)
+            try:
+                await p.chat(
+                    [{"role": "user", "content": "hi"}],
+                    ModelConfig(model_name="MiniMax-M2.7", api_key=api_key or "test"),
+                )
+                return {"success": True}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        elif provider in ["openai", "claude"]:
+            # OpenAI and Claude use OpenAI-compatible API with /v1/chat/completions
+            p = OpenAICompatibleProvider(base_url)
+            try:
+                model_name = {
+                    "openai": "gpt-4o-mini",
+                    "claude": "claude-3-5-sonnet-20241022"
+                }.get(provider, "gpt-4o-mini")
+                await p.chat(
+                    [{"role": "user", "content": "hi"}],
+                    ModelConfig(model_name=model_name, api_key=api_key or "test"),
+                )
+                return {"success": True}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
         elif provider == "openai_compatible":
             p = OpenAICompatibleProvider(base_url)
             try:
-                # Try a minimal completion
                 await p.chat(
                     [{"role": "user", "content": "test"}],
                     ModelConfig(model_name="gpt-4o-mini", api_key=api_key or "test"),
@@ -387,7 +539,7 @@ class LLMRouter:
                 return {"success": True}
             except Exception as e:
                 return {"success": False, "error": str(e)}
-        return {"success": False, "error": "Unknown provider"}
+        return {"success": False, "error": f"Unknown provider: {provider}"}
 
 
 # Global singleton with default providers
@@ -402,5 +554,12 @@ llm_router.register_provider(
 llm_router.register_provider(
     "openai_compatible",
     OpenAICompatibleProvider(),
+    default=False,
+)
+
+# Register MiniMax provider
+llm_router.register_provider(
+    "minimax",
+    MiniMaxProvider(),
     default=False,
 )

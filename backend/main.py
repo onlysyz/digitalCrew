@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.api.routes import agents, tasks, chat, knowledge, tools, system
+from backend.api.routes import agents, tasks, chat, knowledge, tools, system, graph
 from backend.services.agent_manager import agent_manager
 from backend.services.task_scheduler import task_scheduler
 from backend.services.llm_router import llm_router
@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
     app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
     app.include_router(system.router, prefix="/api/v1", tags=["system"])
+    app.include_router(graph.router, prefix="/api/v1/graph", tags=["graph"])
 
     @app.on_event("startup")
     async def startup():

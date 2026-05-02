@@ -258,3 +258,40 @@ async def get_local_models():
 async def clear_cache():
     """Clear temporary cache files"""
     return {"message": "Cache cleared"}
+
+
+class LLMTestRequest(BaseModel):
+    provider: str
+    api_key: str | None = None
+    base_url: str | None = None
+
+
+@router.post("/llm/test")
+async def test_llm_connection(request: LLMTestRequest):
+    """Test connection to an LLM provider"""
+    from backend.services.llm_router import llm_router
+
+    try:
+        if request.provider == "ollama":
+            base_url = request.base_url or "http://localhost:11434"
+            result = await llm_router.test_connection("ollama", base_url)
+        elif request.provider == "minimax":
+            base_url = request.base_url or ""
+            result = await llm_router.test_connection(
+                "minimax",
+                base_url,
+                request.api_key
+            )
+        elif request.provider in ["openai", "claude"]:
+            base_url = request.base_url or ""
+            result = await llm_router.test_connection(
+                "openai_compatible",
+                base_url,
+                request.api_key
+            )
+        else:
+            return {"success": False, "error": f"Unknown provider: {request.provider}"}
+
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
