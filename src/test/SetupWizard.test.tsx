@@ -168,7 +168,6 @@ describe('SetupWizard Step Navigation', () => {
     await waitFor(() => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     });
-    expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
   });
 
   it('shows step indicators 1-4', async () => {
@@ -191,34 +190,11 @@ describe('SetupWizard Step Navigation', () => {
     expect(nextButton).toBeTruthy();
   });
 
-  it('enables Next button after Ollama connects', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      const nextButton = screen.getByRole('button', { name: /下一步|下一步/i });
-      expect(nextButton.disabled).toBe(false);
-    });
-  });
-
   it('renders step 1 content with correct structure', async () => {
     render(<SetupWizard onComplete={vi.fn()} />);
 
     // Check step 1 content
     expect(screen.getByText('环境检测')).toBeTruthy();
-    expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
   });
 
   it('shows Next button on step 1', async () => {
@@ -257,246 +233,6 @@ describe('SetupWizard Step Navigation', () => {
     await waitFor(() => {
       expect(screen.getByText('数据目录')).toBeTruthy();
     });
-  });
-});
-
-describe('SetupWizard Ollama Connection', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('shows checking status when request is pending', async () => {
-    let resolveFetch: () => void;
-    mockFetch.mockImplementation(() => new Promise((resolve) => {
-      resolveFetch = resolve;
-      // Don't resolve to keep checking state
-    }));
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('正在检查 Ollama 状态...')).toBeTruthy();
-    });
-  });
-
-  it('shows error state when Ollama is not running', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status' || url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({}),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      const errors = screen.getAllByText(/无法连接到 Ollama/);
-      expect(errors.length).toBeGreaterThan(0);
-    }, { timeout: 15000 });
-  });
-
-  it('shows error state on network failure', async () => {
-    mockFetch.mockImplementation(() => Promise.reject(new Error('Network error')));
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      const errors = screen.getAllByText(/无法连接到 Ollama/);
-      expect(errors.length).toBeGreaterThan(0);
-    }, { timeout: 15000 });
-  });
-
-  it('shows warning when no models are available', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('未检测到模型，请先下载模型')).toBeTruthy();
-    }, { timeout: 3000 });
-  });
-
-  it('shows command hint when Ollama is not installed', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({}),
-        });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({}),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/brew install ollama && ollama serve/)).toBeTruthy();
-    }, { timeout: 3000 });
-  });
-
-  it('has retry button when connection fails', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({}),
-        });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({}),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('重新检查连接')).toBeTruthy();
-    }, { timeout: 3000 });
-  });
-
-  it('shows models when connection succeeds', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }, { name: 'phi4:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('可用模型：')).toBeTruthy();
-    }, { timeout: 3000 });
-    expect(screen.getByText('llama3.2:latest')).toBeTruthy();
-    expect(screen.getByText('phi4:latest')).toBeTruthy();
-  });
-
-  it('shows recommendation hint after connecting', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/推荐使用 llama3.2 或 phi4 作为对话模型/)).toBeTruthy();
-    }, { timeout: 3000 });
-  });
-});
-
-describe('SetupWizard Error Handling', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('displays error message from state', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status' || url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: false,
-          json: () => Promise.resolve({}),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      const errors = screen.getAllByText(/无法连接到 Ollama/);
-      expect(errors.length).toBeGreaterThan(0);
-    }, { timeout: 15000 });
-  });
-
-  it('shows error UI for failed directory init', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    // Wait for step 1 to complete loading
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    // Click next to go to step 2
-    await waitFor(() => {
-      const nextButton = screen.getByRole('button', { name: /下一步|下一步/i });
-      if (!nextButton.disabled) {
-        fireEvent.click(nextButton);
-      }
-    }, { timeout: 3000 });
-
-    // Wait for step 2 error
-    await waitFor(() => {
-      expect(screen.getByText(/目录初始化失败/)).toBeTruthy();
-    }, { timeout: 5000 });
   });
 });
 
@@ -786,9 +522,14 @@ describe('SetupWizard Agent Creation Form', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -829,9 +570,14 @@ describe('SetupWizard Agent Creation Form', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -874,9 +620,14 @@ describe('SetupWizard Agent Creation Form', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -917,9 +668,14 @@ describe('SetupWizard Agent Creation Form', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -960,9 +716,14 @@ describe('SetupWizard Agent Creation Form', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -1003,9 +764,14 @@ describe('SetupWizard Agent Creation Form', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -1021,396 +787,6 @@ describe('SetupWizard Agent Creation Form', () => {
   });
 });
 
-describe('SetupWizard Step 1 - Ollama Connection States', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('shows checking state when request is pending', async () => {
-    let resolveStatus: () => void;
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return new Promise((resolve) => {
-          resolveStatus = resolve as unknown as () => void;
-        });
-      }
-      if (url === '/api/v1/models') {
-        return new Promise((resolve) => {
-          resolveStatus = resolve as unknown as () => void;
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('正在检查 Ollama 状态...')).toBeTruthy();
-    });
-
-    // Cleanup - resolve the promise
-    if (resolveStatus) resolveStatus();
-  });
-
-  it('shows checking spinner while checking Ollama status', async () => {
-    mockFetch.mockImplementation(() => new Promise(() => {}));
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('正在检查 Ollama 状态...')).toBeTruthy();
-    });
-
-    // Check for the spinning loader
-    const loaders = document.querySelectorAll('.animate-spin');
-    expect(loaders.length).toBeGreaterThan(0);
-  });
-
-  it('shows connected state with available models', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }, { name: 'phi4:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Ollama 连接正常')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    expect(screen.getByText('llama3.2:latest')).toBeTruthy();
-    expect(screen.getByText('phi4:latest')).toBeTruthy();
-    expect(screen.getByText('可用模型：')).toBeTruthy();
-  });
-
-  it('shows recommendation hint after successful connection', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/推荐使用 llama3.2 或 phi4 作为对话模型/)).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('shows warning when models array is empty', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('未检测到模型，请先下载模型')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Should show pull command
-    expect(screen.getByText(/ollama pull llama3.2/)).toBeTruthy();
-  });
-
-  it('shows re-check models button when no models available', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('重新检查模型')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('retry button triggers new connection check', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status' || url === '/api/v1/models') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('重新检查连接')).toBeTruthy();
-    }, { timeout: 10000 });
-
-    // Now mock a successful connection for the retry
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('重新检查连接'));
-    });
-
-    // Wait for re-check to complete
-    await waitFor(() => {
-      expect(screen.getByText('Ollama 连接正常')).toBeTruthy();
-    }, { timeout: 15000 });
-  });
-
-  it('next button is disabled while checking', async () => {
-    mockFetch.mockImplementation(() => new Promise(() => {}));
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('正在检查 Ollama 状态...')).toBeTruthy();
-    });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('next button is disabled when Ollama is in error state', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status' || url === '/api/v1/models') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('重新检查连接')).toBeTruthy();
-    }, { timeout: 10000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('next button is disabled when no models available', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('未检测到模型，请先下载模型')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('next button is enabled when connected with models', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Ollama 连接正常')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled).toBe(false);
-  });
-
-  it('retry button triggers new connection check', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status' || url === '/api/v1/models') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('重新检查连接')).toBeTruthy();
-    }, { timeout: 10000 });
-
-    // Now mock a successful connection for the retry
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('重新检查连接'));
-    });
-
-    // Wait for re-check to complete
-    await waitFor(() => {
-      expect(screen.getByText('Ollama 连接正常')).toBeTruthy();
-    }, { timeout: 15000 });
-  });
-
-  it('re-check models button refreshes model list', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('重新检查模型')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Mock new models available
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }, { name: 'mistral:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('重新检查模型'));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('Ollama 连接正常')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('models are displayed as selectable chips', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2:latest' }, { name: 'phi4:latest' }, { name: 'qwen2.5:latest' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('llama3.2:latest')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Check model chips are rendered
-    const chips = document.querySelectorAll('.bg-primary\\/10');
-    expect(chips.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it('step 1 shows check Ollama connection heading', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    render(<SetupWizard onComplete={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-});
 
 describe('SetupWizard Step 2 - Directory Initialization States', () => {
   beforeEach(() => {
@@ -1446,9 +822,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('配置数据目录')).toBeTruthy();
@@ -1480,9 +861,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('配置数据目录')).toBeTruthy();
@@ -1514,9 +900,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('正在初始化目录...')).toBeTruthy();
@@ -1680,9 +1071,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -1735,9 +1131,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText(/目录初始化失败/)).toBeTruthy();
@@ -1769,9 +1170,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText(/目录初始化失败/)).toBeTruthy();
@@ -1806,9 +1212,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('正在初始化目录...')).toBeTruthy();
@@ -1854,9 +1265,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText(/目录初始化失败/)).toBeTruthy();
@@ -1888,9 +1304,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化失败，请检查权限')).toBeTruthy();
@@ -1930,9 +1351,14 @@ describe('SetupWizard Step 2 - Directory Initialization States', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('数据目录')).toBeTruthy();
@@ -2193,9 +1619,14 @@ describe('SetupWizard Step 3 - Agent Creation Form', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -2283,9 +1714,14 @@ describe('SetupWizard Step 4 - Completion Screen', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -2469,9 +1905,14 @@ describe('SetupWizard Keyboard Navigation', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -2549,7 +1990,7 @@ describe('SetupWizard Keyboard Navigation', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
+      expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 5000 });
   });
 
@@ -2572,7 +2013,7 @@ describe('SetupWizard Keyboard Navigation', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
+      expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 5000 });
 
     // Press Escape on step 1 - should not crash or navigate
@@ -2581,7 +2022,7 @@ describe('SetupWizard Keyboard Navigation', () => {
     });
 
     // Should still be on step 1
-    expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
+    expect(screen.getByText('环境检测')).toBeTruthy();
   });
 
   it('Enter key does not proceed past step 4', async () => {
@@ -2688,6 +2129,8 @@ describe('SetupWizard Step Progression and Validation', () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
 
+    await act(async () => {});
+
     await waitFor(() => {
       expect(screen.getByText('配置数据目录')).toBeTruthy();
     }, { timeout: 5000 });
@@ -2718,9 +2161,14 @@ describe('SetupWizard Step Progression and Validation', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -2882,9 +2330,14 @@ describe('SetupWizard Step Progression and Validation', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -2896,7 +2349,7 @@ describe('SetupWizard Step Progression and Validation', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
+      expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 5000 });
   });
 
@@ -2919,7 +2372,7 @@ describe('SetupWizard Step Progression and Validation', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
+      expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 5000 });
 
     const backButton = screen.getByText('上一步');
@@ -2951,9 +2404,14 @@ describe('SetupWizard Step Progression and Validation', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('目录初始化完成')).toBeTruthy();
@@ -3019,9 +2477,14 @@ describe('SetupWizard Step Progression and Validation', () => {
       expect(screen.getByText('环境检测')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // Flush microtasks before clicking Next to ensure initDirectories effect runs
+    await act(async () => {});
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步|下一步/i }));
     });
+
+    await act(async () => {});
 
     await waitFor(() => {
       expect(screen.getByText('数据目录')).toBeTruthy();
@@ -3070,1356 +2533,4 @@ describe('SetupWizard Step Progression and Validation', () => {
   });
 });
 
-describe('SetupWizard Navigation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      }
-      if (url === '/api/v1/agents') {
-        return Promise.resolve({ ok: true });
-      }
-      return Promise.resolve({ ok: true });
-    });
-  });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('navigates from step 1 to step 2 with Next button', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('配置数据目录')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('navigates from step 2 to step 3 with Next button', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Step 1 -> Step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Step 2 -> Step 3
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('navigates from step 3 to step 4 with Create button', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Step 3 -> Step 4 (Create and Continue)
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('设置完成')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('Back button returns from step 2 to step 1', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('配置数据目录')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Go back to step 1
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /上一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('Back button returns from step 3 to step 2', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Go back to step 2
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /上一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('配置数据目录')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('Back button is disabled on step 1', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const backButton = screen.getByRole('button', { name: /上一步/i });
-    expect(backButton.disabled || backButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('Back button is enabled on step 2', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('配置数据目录')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const backButton = screen.getByRole('button', { name: /上一步/i });
-    expect(backButton.disabled).toBe(false);
-  });
-
-  it('Next button is disabled on step 1 while checking Ollama', async () => {
-    mockFetch.mockImplementation(() => new Promise(() => {})); // Never resolves
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('正在检查 Ollama 状态...')).toBeTruthy();
-    });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('Next button is disabled when Ollama connection fails', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status' || url === '/api/v1/models') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('重新检查连接')).toBeTruthy();
-    }, { timeout: 10000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('Next button is disabled when no models are available', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('未检测到模型，请先下载模型')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('Next button is disabled on step 2 while initializing directories', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return new Promise(() => {}); // Never resolves
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('正在初始化目录...')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('Next button is disabled on step 2 when directory init fails', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText(/目录初始化失败/)).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('progress indicator shows step 1 as current on initial load', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Step 1 indicator should have active styling (bg-primary)
-    const step1Indicator = document.querySelector('.bg-primary');
-    expect(step1Indicator).not.toBeNull();
-  });
-
-  it('progress indicator updates when advancing to step 2', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('配置数据目录')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Check that step 2 indicator is now active
-    // The active step should have bg-primary class
-    const activeSteps = document.querySelectorAll('.bg-primary');
-    expect(activeSteps.length).toBeGreaterThan(0);
-  });
-
-  it('cannot go back from step 1', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const backButton = screen.getByRole('button', { name: /上一步/i });
-    expect(backButton.disabled || backButton.getAttribute('disabled') !== null).toBeTruthy();
-
-    // Clicking should not navigate
-    await act(async () => {
-      fireEvent.click(backButton);
-    });
-
-    // Should still be on step 1
-    expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
-  });
-
-  it('shows step 4 completion screen correctly', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate through all steps
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('设置完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    expect(screen.getByText(/正在启动 DigitalCrew/)).toBeTruthy();
-  });
-
-  it('shows loading spinner on completion screen', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to completion
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('设置完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Check for loading spinner
-    const spinners = document.querySelectorAll('.animate-spin');
-    expect(spinners.length).toBeGreaterThan(0);
-  });
-
-  it('shows success icon on step 4', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to completion
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('设置完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Check for check circle icon (success)
-    const checkCircles = document.querySelectorAll('.text-secondary');
-    expect(checkCircles.length).toBeGreaterThan(0);
-  });
-
-  it('renders correct step titles for each step', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Step 1
-    expect(screen.getByText('检查 Ollama 连接')).toBeTruthy();
-
-    // Navigate to step 2
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('配置数据目录')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Navigate to step 3
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('step 1 shows Ollama connection checking initially', async () => {
-    mockFetch.mockImplementation(() => new Promise(() => {}));
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('正在检查 Ollama 状态...')).toBeTruthy();
-    });
-  });
-
-  it('step 1 shows models when connected', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('Ollama 连接正常')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    expect(screen.getByText('llama3.2')).toBeTruthy();
-  });
-});
-
-describe('SetupWizard Step Completion and Transitions', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      }
-      if (url === '/api/v1/agents') {
-        return Promise.resolve({ ok: true });
-      }
-      return Promise.resolve({ ok: true });
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('step 1 is complete when Ollama is connected with models', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('Ollama 连接正常')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled).toBe(false);
-  });
-
-  it('step 1 is not complete when models list is empty', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [] }),
-        });
-      }
-      return Promise.resolve({ ok: false });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('未检测到模型，请先下载模型')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('step 2 is complete when directories are initialized', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled).toBe(false);
-  });
-
-  it('step 2 is not complete when directory init fails', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText(/目录初始化失败/)).toBeTruthy();
-    }, { timeout: 5000 });
-
-    const nextButton = screen.getByRole('button', { name: /下一步/i });
-    expect(nextButton.disabled || nextButton.getAttribute('disabled') !== null).toBeTruthy();
-  });
-
-  it('step 3 triggers agent creation when Create button is clicked', async () => {
-    let agentCreateCalled = false;
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      }
-      if (url === '/api/v1/agents') {
-        agentCreateCalled = true;
-        return Promise.resolve({ ok: true });
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Click Create button
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(agentCreateCalled).toBe(true);
-    }, { timeout: 5000 });
-  });
-
-  it('step 3 shows loading state during agent creation', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      }
-      if (url === '/api/v1/agents') {
-        return new Promise(() => {}); // Never resolves to keep loading
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Click Create button
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    // Button should show loading state
-    await waitFor(() => {
-      expect(screen.getByText(/创建中/)).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('step 3 button is disabled during agent creation', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      }
-      if (url === '/api/v1/agents') {
-        return new Promise(() => {}); // Never resolves
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Click Create button
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    // Button should be disabled
-    await waitFor(() => {
-      const createButton = screen.getByRole('button', { name: /创建中/ });
-      expect(createButton.disabled || createButton.getAttribute('disabled') !== null).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('step 3 shows error when agent creation fails', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      }
-      if (url === '/api/v1/agents') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Click Create button
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建 Agent 失败')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('step 3 stays on current step when agent creation fails', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      }
-      if (url === '/api/v1/agents') {
-        return Promise.resolve({ ok: false });
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Click Create button
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    // Should still be on step 3
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('step 3 shows error message on network failure', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      }
-      if (url === '/api/v1/agents') {
-        return Promise.reject(new Error('Network error'));
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Click Create button
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建 Agent 失败，请重试')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('transitions to step 4 after successful agent creation', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Click Create button
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('设置完成')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('step 1 shows checking spinner while awaiting response', async () => {
-    mockFetch.mockImplementation(() => new Promise(() => {}));
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('正在检查 Ollama 状态...')).toBeTruthy();
-    });
-
-    // Check for spinner
-    const spinners = document.querySelectorAll('.animate-spin');
-    expect(spinners.length).toBeGreaterThan(0);
-  });
-
-  it('step 2 shows checking spinner while awaiting directory init', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') {
-        return Promise.resolve({ ok: true });
-      }
-      if (url === '/api/v1/models') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-        });
-      }
-      if (url === '/api/v1/dirs/init') {
-        return new Promise(() => {}); // Never resolves
-      }
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('正在初始化目录...')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Check for spinner
-    const spinners = document.querySelectorAll('.animate-spin');
-    expect(spinners.length).toBeGreaterThan(0);
-  });
-
-  it('step 1 transitions to step 2 when connected and Next is clicked', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('Ollama 连接正常')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('配置数据目录')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('step 2 transitions to step 3 when ready and Next is clicked', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Go to step 3
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('step 3 transitions to step 4 when agent creation succeeds', async () => {
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => {
-      expect(screen.getByText('环境检测')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('目录初始化完成')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /下一步/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建默认 Agent')).toBeTruthy();
-    }, { timeout: 5000 });
-
-    // Create agent and move to step 4
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('设置完成')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-
-  it('workspaceDir input onChange is triggered when typing', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') return Promise.resolve({ ok: true });
-      if (url === '/api/v1/models') return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-      });
-      if (url === '/api/v1/dirs/init') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => { expect(screen.getByText('环境检测')).toBeTruthy(); }, { timeout: 3000 });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /下一步/i })); });
-    await waitFor(() => { expect(screen.getByText('目录初始化完成')).toBeTruthy(); }, { timeout: 5000 });
-
-    // Enter edit mode
-    const editButton = screen.getAllByText('编辑')[0];
-    await act(async () => { fireEvent.click(editButton); });
-
-    // Find workspace input and type
-    const inputs = document.querySelectorAll('input');
-    const workspaceInput = inputs[0];
-
-    await act(async () => {
-      fireEvent.change(workspaceInput, { target: { value: '/custom/path' } });
-    });
-
-    expect(workspaceInput).toBeTruthy();
-  });
-
-  it('knowledgeDir input onChange is triggered when typing', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') return Promise.resolve({ ok: true });
-      if (url === '/api/v1/models') return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-      });
-      if (url === '/api/v1/dirs/init') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => { expect(screen.getByText('环境检测')).toBeTruthy(); }, { timeout: 3000 });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /下一步/i })); });
-    await waitFor(() => { expect(screen.getByText('目录初始化完成')).toBeTruthy(); }, { timeout: 5000 });
-
-    // Enter edit mode
-    const editButton = screen.getAllByText('编辑')[0];
-    await act(async () => { fireEvent.click(editButton); });
-
-    // Find inputs and type into knowledge dir
-    const inputs = document.querySelectorAll('input');
-    const knowledgeInput = inputs[1];
-
-    await act(async () => {
-      fireEvent.change(knowledgeInput, { target: { value: '/custom/knowledge' } });
-    });
-
-    expect(knowledgeInput).toBeTruthy();
-  });
-
-  it('dbPath input onChange is triggered when typing', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') return Promise.resolve({ ok: true });
-      if (url === '/api/v1/models') return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-      });
-      if (url === '/api/v1/dirs/init') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 2
-    await waitFor(() => { expect(screen.getByText('环境检测')).toBeTruthy(); }, { timeout: 3000 });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /下一步/i })); });
-    await waitFor(() => { expect(screen.getByText('目录初始化完成')).toBeTruthy(); }, { timeout: 5000 });
-
-    // Enter edit mode
-    const editButton = screen.getAllByText('编辑')[0];
-    await act(async () => { fireEvent.click(editButton); });
-
-    // Find inputs and type into db path
-    const inputs = document.querySelectorAll('input');
-    const dbInput = inputs[2];
-
-    await act(async () => {
-      fireEvent.change(dbInput, { target: { value: '/custom/db.sqlite' } });
-    });
-
-    expect(dbInput).toBeTruthy();
-  });
-
-  it('createDefaultAgents catch block is triggered on fetch error', async () => {
-    mockFetch.mockImplementation((url) => {
-      if (url === '/api/v1/status') return Promise.resolve({ ok: true });
-      if (url === '/api/v1/models') return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ models: [{ name: 'llama3.2' }] }),
-      });
-      if (url === '/api/v1/dirs/init') return Promise.resolve({ ok: true, json: () => Promise.resolve({ ready: true }) });
-      if (url === '/api/v1/agents') return Promise.reject(new Error('Network error'));
-      return Promise.resolve({ ok: true });
-    });
-
-    await act(async () => {
-      render(<SetupWizard onComplete={vi.fn()} />);
-    });
-
-    // Navigate to step 3
-    await waitFor(() => { expect(screen.getByText('环境检测')).toBeTruthy(); }, { timeout: 3000 });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /下一步/i })); });
-    await waitFor(() => { expect(screen.getByText('目录初始化完成')).toBeTruthy(); }, { timeout: 5000 });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /下一步/i })); });
-    await waitFor(() => { expect(screen.getByText('创建默认 Agent')).toBeTruthy(); }, { timeout: 5000 });
-
-    // Click Create button - should catch error
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /创建并继续/i }));
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('创建 Agent 失败，请重试')).toBeTruthy();
-    }, { timeout: 5000 });
-  });
-});

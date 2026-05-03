@@ -101,6 +101,13 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const [stepKey, setStepKey] = useState(1);
   const [isBack, setIsBack] = useState(false);
 
+  // Auto-check connection when provider changes
+  useEffect(() => {
+    if (currentStep === 1 && selectedProvider === 'ollama') {
+      checkConnection();
+    }
+  }, [selectedProvider]);
+
   useEffect(() => {
     if (currentStep === 2) {
       initDirectories();
@@ -818,7 +825,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
             onClick={currentStep === 3 ? createDefaultAgents : handleNext}
             disabled={
               (currentStep === 1 && (
-                (selectedProvider === 'ollama' && ollamaStatus === 'idle') ||
+                (selectedProvider === 'ollama' && ollamaStatus !== 'connected') ||
                 (selectedProvider !== 'ollama' && ollamaStatus !== 'connected')
               )) ||
               (currentStep === 2 && dirInitStatus !== 'ready') ||
