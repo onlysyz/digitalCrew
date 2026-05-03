@@ -168,22 +168,35 @@ async def chat_team(request: ChatRequest):
     )
     await task_scheduler.assign_task(task.id, [a.id for a in target_agents])
 
-    # Execute via supervisor
+    # Execute via GraphEngine
     try:
-        # Collect events from the async iterator
         final_output = ""
-        async for event in supervisor_runtime.execute(
-            goal=request.message,
-            available_agents=target_agents,
-            task_id=task.id,
-        ):
-            if event.get("type") == "done":
-                final_output = event.get("output", "")
+        initial_state: GraphState = {
+            "thread_id": session_id,
+            "goal": request.message,
+            "plan": [],
+            "current_step": 0,
+            "results": {},
+            "raw_outputs": {},
+            "status": "planning",
+            "error": None,
+            "context": SubAgentContext(goal=request.message),
+            "available_agents": target_agents,
+        }
+
+        async def emit_noop(event):
+            return
+            yield  # make it a generator
+
+        engine = create_default_engine()
+        async for delta in engine.execute(initial_state, emit_noop):
+            if delta.get("status") == "done" or delta.get("type") == "done":
+                final_output = str(delta.get("results", {}))
 
         # Mark task as completed
         await task_scheduler.complete_task(task.id, {"output": final_output})
     except Exception as e:
-        final_output = f"Supervisor execution error: {str(e)}"
+        final_output = f"GraphEngine execution error: {str(e)}"
 
     assistant_msg = ChatMessage(role="assistant", content=final_output)
     session.messages.append(assistant_msg)
