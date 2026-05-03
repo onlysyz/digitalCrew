@@ -21,6 +21,8 @@ from backend.models.schemas import ChatMessage, ChatSession
 from backend.services.agent_manager import agent_manager
 from backend.services.task_scheduler import task_scheduler
 from backend.services.supervisor import supervisor_runtime
+from backend.services.graph.engine import create_default_engine
+from backend.services.graph.state import GraphState, SubAgentContext
 from backend.services.llm_router import llm_router
 from backend.services.session_store import session_store
 
@@ -248,28 +250,37 @@ async def chat_team_stream(request: ChatRequest):
         for i, agent in enumerate(target_agents):
             yield f"data: {json_dumps_safe({'type': 'subtask_start', 'agent_id': agent.id, 'agent_name': agent.name})}\n\n"
 
-        # Stream response using supervisor with real-time progress
+        # Stream response using GraphEngine with real-time progress
         final_output = ""
         results = {}
         try:
             # First send thinking status
             yield f"data: {json_dumps_safe({'type': 'status', 'content': '主管代理正在分析并分解任务...'})}\n\n"
 
-            async for event in supervisor_runtime.execute(
-                goal=request.message,
-                available_agents=target_agents,
-                task_id=task.id,
-            ):
-                # Capture thread_id from first event and persist to session
-                if session.thread_id is None and event.get("thread_id"):
-                    session.thread_id = event["thread_id"]
-                    session_store.update(session)
-                # Forward supervisor events as SSE
-                yield f"data: {json_dumps_safe(event)}\n\n"
+            # Build initial graph state
+            initial_state: GraphState = {
+                "thread_id": session_id,
+                "goal": request.message,
+                "plan": [],
+                "current_step": 0,
+                "results": {},
+                "raw_outputs": {},
+                "status": "planning",
+                "error": None,
+                "context": SubAgentContext(goal=request.message),
+                "available_agents": target_agents,
+            }
+
+            async def emit_event(event):
+                yield event
+
+            engine = create_default_engine()
+            async for delta in engine.execute(initial_state, emit_event):
+                # Forward graph events as SSE
+                yield f"data: {json_dumps_safe(delta)}\n\n"
                 # Collect final output and results
-                if event.get("type") == "done":
-                    final_output = event.get("output", "")
-                    results = event.get("results", {})
+                if delta.get("type") == "done" or delta.get("status") == "done":
+                    final_output = delta.get("results", {})
 
             # Mark task as completed
             await task_scheduler.complete_task(task.id, {"output": final_output})
