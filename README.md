@@ -96,6 +96,66 @@ digitalCrew/
 └── prd.md              # 产品需求文档
 ```
 
+## GraphEngine 中断/恢复流程
+
+DigitalCrew 的多 Agent 编排基于 GraphEngine 状态机实现，支持执行中的人机介入。
+
+### 架构概览
+
+```
+ChatPanel → /api/v1/chat/team/stream → SupervisorRuntime
+                                      → GraphEngine.execute()
+                                          ├── plan_node       (LLM 分解任务)
+                                          ├── execute_node    (调度 sub-agent)
+                                          └── integrate_node  (汇总结果)
+                                      ↑ emit SSE events
+ChatPanel ← ← ← ← ← ← ← ← ← ← ← ← ←
+```
+
+### 执行节点
+
+| 节点 | 功能 | 中断触发 |
+|------|------|---------|
+| `plan_node` | 调用 LLM 将用户 goal 分解为 SubTask 列表 | 计划阶段用户可修改/删除 subtask |
+| `execute_node` | 对每个 SubTask 调用对应 agent，执行时流式输出 token | subtask 完成前用户可取消 |
+| `integrate_node` | 将所有 sub-agent 输出汇总成最终回复 | 无 |
+
+### 中断/恢复流程
+
+1. **中断触发**：GraphEngine 执行到 `plan_node` 末尾时，检查 `_interrupt_nodes` 是否包含当前节点。若是，则：
+   - 调用 `CheckpointStore.save()` 持久化当前 `GraphState`
+   - 发出 `GraphEvent(type="interrupt")` SSE 事件到前端
+   - 引擎暂停，等待 resume 信号
+
+2. **前端响应**：ChatPanel 收到 `interrupt` 事件后：
+   - 展示计划编辑 UI（显示 SubTask 列表）
+   - 用户可删除、修改、或确认计划
+   - 用户确认后调用 `POST /api/v1/graph/{thread_id}/resume`
+
+3. **恢复执行**：Resume 端点调用 `SupervisorRuntime.submit_intervention()`，引擎从 checkpoint 恢复状态继续执行。
+
+### Checkpoint 持久化
+
+状态保存于 `backend/services/graph/checkpoint.py` (SQLite)：
+
+```python
+CheckpointStore.save(thread_id, step, state)  # 每节点执行后自动调用
+CheckpointStore.load(thread_id)               # resume 时恢复
+```
+
+### SSE 事件类型映射
+
+| GraphEvent.type | 前端 status 类型 | 说明 |
+|----------------|-----------------|------|
+| `state_update` | `status` | 状态增量更新 |
+| `node_start` | `status` | 节点开始 |
+| `node_end` | `status` | 节点结束 |
+| `stream_token` | `subtask_token` | LLM 流式输出 |
+| `subtask_start` | `subtask_start` | sub-agent 开始 |
+| `subtask_complete` | `subtask_complete` | sub-agent 完成 |
+| `interrupt` | `interrupt` | 需要用户介入 |
+| `done` | `done` | 执行完成 |
+
 ## API 文档
 
 后端启动后访问：
