@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend-tests:
+    name: Frontend (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest
+        run: npm test -- --run
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-results
+          path: |
+            test-results/
+            coverage/
+          retention-days: 7
+
+  backend-tests:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.11-slim
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir -r backend/requirements.txt
+          pip install --no-cache-dir pytest pytest-asyncio httpx
+
+      - name: Run interrupt integration tests
+        run: pytest backend/test/test_interrupt_resume_integration.py -v
+
+      - name: Run interrupt flow tests
+        run: pytest backend/test/test_interrupt_flow.py -v
