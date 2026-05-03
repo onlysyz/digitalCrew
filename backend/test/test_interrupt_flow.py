@@ -20,7 +20,7 @@ from backend.models.schemas import ChatSession, TaskStatus, Task
 from backend.services.session_store import SessionStore
 from backend.services.task_store import TaskStore
 from backend.services.supervisor import supervisor_runtime
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def test_session_thread_id_field():
@@ -53,11 +53,11 @@ def test_task_store_persistence():
         store = TaskStore(db_path=db_path)
 
         pending = Task(id="t-pending", description="P", status=TaskStatus.PENDING,
-                        priority=2, input_data={}, created_at=datetime.utcnow())
+                        priority=2, input_data={}, created_at=datetime.now(timezone.utc))
         assigned = Task(id="t-assigned", description="A", status=TaskStatus.ASSIGNED,
-                        priority=1, assigned_agents=["a1"], input_data={}, created_at=datetime.utcnow())
+                        priority=1, assigned_agents=["a1"], input_data={}, created_at=datetime.now(timezone.utc))
         running = Task(id="t-running", description="R", status=TaskStatus.RUNNING,
-                       priority=1, input_data={}, created_at=datetime.utcnow(), started_at=datetime.utcnow())
+                       priority=1, input_data={}, created_at=datetime.now(timezone.utc), started_at=datetime.now(timezone.utc))
         for t in [pending, assigned, running]:
             store.save(t)
 
@@ -68,7 +68,7 @@ def test_task_store_persistence():
         for t in store2.load_all():
             if t.status == TaskStatus.RUNNING:
                 t.status = TaskStatus.FAILED
-                t.completed_at = datetime.utcnow()
+                t.completed_at = datetime.now(timezone.utc)
                 store2.save(t)
             elif t.status in (TaskStatus.PENDING, TaskStatus.ASSIGNED, TaskStatus.PAUSED):
                 restored[t.id] = t

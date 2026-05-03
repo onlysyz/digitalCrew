@@ -2,7 +2,7 @@
 DigitalCrew Data Models
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -80,13 +80,13 @@ class AgentConfig(BaseModel):
     status: AgentStatus = AgentStatus.IDLE
     is_archived: bool = False
     metrics: AgentMetrics = Field(default_factory=AgentMetrics)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ReActStep(BaseModel):
     step_id: int
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     agent_id: str = ""
     thought: str = ""
     action: str = ""
@@ -109,7 +109,7 @@ class Task(BaseModel):
     input_data: dict = Field(default_factory=dict)
     output_data: dict = Field(default_factory=dict)
     react_trace: list[ReActStep] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     timeout_seconds: int = 300
@@ -121,7 +121,7 @@ class ChatMessage(BaseModel):
     role: str  # user | assistant | system
     content: str
     agent_id: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict = Field(default_factory=dict)
 
 
@@ -129,8 +129,8 @@ class ChatSession(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     agent_id: Optional[str] = None  # None for team chat
     messages: list[ChatMessage] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     thread_id: Optional[str] = None  # Active supervisor thread_id for this session
 
 
@@ -143,8 +143,8 @@ class KnowledgeBase(BaseModel):
     chunk_overlap: int = 50
     document_count: int = 0
     total_chunks: int = 0
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Document(BaseModel):
@@ -154,7 +154,7 @@ class Document(BaseModel):
     filepath: str
     file_size: int = 0
     chunk_count: int = 0
-    indexed_at: datetime = Field(default_factory=datetime.utcnow)
+    indexed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ToolDefinition(BaseModel):
