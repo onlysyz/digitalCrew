@@ -219,7 +219,7 @@ async def chat_team_stream(request: ChatRequest):
 
         # Filter agents based on @ mentions if specified
         if mentioned_names and request.mentioned_agents is None:
-            mentioned_agents = [a for a in all_agents if any(name.lower() in a.name.lower() for name in mentioned_names)]
+            mentioned_agents = match_mentioned_agents(mentioned_names, all_agents)
         else:
             mentioned_agents = [a for a in all_agents if a.id in (request.mentioned_agents or [])]
 
